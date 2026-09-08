@@ -1,0 +1,30 @@
+{
+  "name": "tw-stock-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "台股脈動 — 個人化台股追蹤：自選股/持股損益、個人化新聞、推薦標的、價格與事件提醒",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "offline": "TSP_OFFLINE=1 node server.js",
+    "build:css": "tailwindcss -i src/styles.css -o public/tailwind.css --minify",
+    "watch:css": "tailwindcss -i src/styles.css -o public/tailwind.css --watch",
+    "test": "node --test",
+    "check-sources": "node scripts/check-sources.js"
+  },
+  "keywords": [
+    "台股",
+    "stock",
+    "twse",
+    "tpex",
+    "watchlist"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

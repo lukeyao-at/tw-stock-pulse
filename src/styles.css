@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* 字型走系統既有的中文字型，不從 CDN 拉 webfont */
+    font-family: theme('fontFamily.sans');
+    background-color: #f8fafc;
+  }
+}
+
+@layer components {
+  .tab-content { display: none; }
+  .tab-content.active {
+    display: block;
+    animation: fadeIn 0.25s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 數字欄位等寬，表格才不會跳動 */
+  .num { font-variant-numeric: tabular-nums; }
+
+  .score-bar { background: linear-gradient(90deg, #3b82f6, #1d4ed8); }
+
+  /* 新聞摘要限兩行 */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}

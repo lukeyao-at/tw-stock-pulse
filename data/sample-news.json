@@ -1,0 +1,145 @@
+{
+  "note": "離線樣本新聞。標題為模擬內容，僅供介面演示與測試，非真實新聞。",
+  "items": [
+    {
+      "title": "台積電法說會優於預期 外資上調目標價至1300元",
+      "summary": "先進製程需求強勁，法人看好明年營收成長雙位數，外資買超逾兩萬張。",
+      "source": "Yahoo 股市",
+      "link": "https://example.invalid/news/e58fb0e7a98d",
+      "publishedAt": "2026-09-08T13:07:57.029Z"
+    },
+    {
+      "title": "聯發科旗艦晶片接單告捷 營收創高",
+      "summary": "新一代行動平台獲多家品牌採用，出貨動能延續至下季。",
+      "source": "鉅亨網 台股",
+      "link": "https://example.invalid/news/e881afe799bc",
+      "publishedAt": "2026-09-08T12:25:57.029Z"
+    },
+    {
+      "title": "航運股遭法人賣超 長榮陽明同步走弱",
+      "summary": "歐美線運價回檔，市場對旺季不如預期產生疑慮。",
+      "source": "經濟日報 證券",
+      "link": "https://example.invalid/news/e888aae9818b",
+      "publishedAt": "2026-09-08T11:37:57.029Z"
+    },
+    {
+      "title": "面板雙虎報價下修 友達群創庫存去化壓力增",
+      "summary": "電視面板需求疲軟，第四季報價恐再降價。",
+      "source": "工商時報",
+      "link": "https://example.invalid/news/e99da2e69dbf",
+      "publishedAt": "2026-09-08T11:01:57.029Z"
+    },
+    {
+      "title": "緯創AI伺服器出貨放量 廣達同步受惠",
+      "summary": "雲端客戶擴大採購，法人上修全年出貨預估。",
+      "source": "Yahoo 股市",
+      "link": "https://example.invalid/news/e7b7afe589b5",
+      "publishedAt": "2026-09-08T10:31:57.029Z"
+    },
+    {
+      "title": "金融股股利政策優於預期 富邦金國泰金填息有望",
+      "summary": "壽險資本適足率改善，殖利率具吸引力。",
+      "source": "鉅亨網 台股",
+      "link": "https://example.invalid/news/e98791e89e8d",
+      "publishedAt": "2026-09-08T09:07:57.029Z"
+    },
+    {
+      "title": "環球晶遭砍單傳聞 公司否認",
+      "summary": "公司表示訂單能見度正常，無客戶調整規劃。",
+      "source": "經濟日報 證券",
+      "link": "https://example.invalid/news/e792b0e79083",
+      "publishedAt": "2026-09-08T08:37:57.029Z"
+    },
+    {
+      "title": "中鋼盤價開平 鋼市觀望氣氛濃",
+      "summary": "下游需求未見明顯回升，業者保守看待。",
+      "source": "工商時報",
+      "link": "https://example.invalid/news/e4b8ade98bbc",
+      "publishedAt": "2026-09-08T07:25:57.029Z"
+    },
+    {
+      "title": "力旺矽智財授權金成長 毛利率創新高",
+      "summary": "記憶體IP需求隨AI晶片設計案增加而擴大。",
+      "source": "Yahoo 股市",
+      "link": "https://example.invalid/news/e58a9be697ba",
+      "publishedAt": "2026-09-08T06:37:57.029Z"
+    },
+    {
+      "title": "藥華藥新藥銷售放量 單季轉盈",
+      "summary": "美國市場處方數持續成長，法人調升評等。",
+      "source": "鉅亨網 台股",
+      "link": "https://example.invalid/news/e897a5e88faf",
+      "publishedAt": "2026-09-08T05:13:57.029Z"
+    },
+    {
+      "title": "台塑三寶營收衰退 財測下修",
+      "summary": "油價與需求雙重壓力，塑化景氣尚未落底。",
+      "source": "經濟日報 證券",
+      "link": "https://example.invalid/news/e58fb0e5a191",
+      "publishedAt": "2026-09-08T04:31:57.029Z"
+    },
+    {
+      "title": "和泰車新車交付回升 市占率站上三成",
+      "summary": "國產與進口車款需求同步回溫。",
+      "source": "工商時報",
+      "link": "https://example.invalid/news/e5928ce6b3b0",
+      "publishedAt": "2026-09-08T03:37:57.029Z"
+    },
+    {
+      "title": "聯電產能利用率回升 成熟製程止跌",
+      "summary": "特殊製程訂單回流，法人看好毛利率改善。",
+      "source": "Yahoo 股市",
+      "link": "https://example.invalid/news/e881afe99bbb",
+      "publishedAt": "2026-09-08T02:07:57.029Z"
+    },
+    {
+      "title": "華碩電競筆電旺季拉貨 獲利成長",
+      "summary": "高階機種占比提升帶動平均單價走揚。",
+      "source": "鉅亨網 台股",
+      "link": "https://example.invalid/news/e88fafe7a2a9",
+      "publishedAt": "2026-09-08T01:25:57.029Z"
+    },
+    {
+      "title": "元太電子紙需求強勁 擴產計畫加速",
+      "summary": "電子標籤導入零售通路，訂單能見度看到明年。",
+      "source": "經濟日報 證券",
+      "link": "https://example.invalid/news/e58583e5a4aa",
+      "publishedAt": "2026-09-08T00:37:57.029Z"
+    },
+    {
+      "title": "統一超新型店擴張 單店營收突破",
+      "summary": "鮮食與自有品牌貢獻毛利提升。",
+      "source": "工商時報",
+      "link": "https://example.invalid/news/e7b5b1e4b880",
+      "publishedAt": "2026-09-07T23:01:57.029Z"
+    },
+    {
+      "title": "日月光投控封測產能吃緊 調升報價",
+      "summary": "先進封裝需求外溢至傳統封測。",
+      "source": "Yahoo 股市",
+      "link": "https://example.invalid/news/e697a5e69c88",
+      "publishedAt": "2026-09-07T22:19:57.029Z"
+    },
+    {
+      "title": "台股攻上 24500 點 成交值放大",
+      "summary": "權值股領漲，市場資金回流電子類股。",
+      "source": "鉅亨網 台股",
+      "link": "https://example.invalid/news/e58fb0e882a1",
+      "publishedAt": "2026-09-07T21:37:57.029Z"
+    },
+    {
+      "title": "中鋼構今日漲停 工程訂單挹注",
+      "summary": "綠能與離岸風電結構件訂單成長。",
+      "source": "經濟日報 證券",
+      "link": "https://example.invalid/news/e4b8ade98bbc",
+      "publishedAt": "2026-09-07T19:37:57.029Z"
+    },
+    {
+      "title": "2026 年台股展望 分析師看好AI續航",
+      "summary": "法人預估企業獲利成長將延續至明年下半年。",
+      "source": "工商時報",
+      "link": "https://example.invalid/news/3230323620e5",
+      "publishedAt": "2026-09-07T17:37:57.029Z"
+    }
+  ]
+}
