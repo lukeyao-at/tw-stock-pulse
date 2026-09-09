@@ -44,7 +44,10 @@
 
 <div class="flex min-h-screen">
     <!-- ── 側欄 ───────────────────────────────────────── -->
-    <aside class="hidden md:flex md:w-60 flex-col bg-sidebar text-slate-300 shrink-0">
+    <!-- 手機上以浮層呈現（fixed），桌機才是版面的一部分（md:static）。
+         若沿用 flex 子元素的作法，手機打開選單會擠壓內容區。 -->
+    <div id="backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden"></div>
+    <aside class="hidden md:flex fixed md:static inset-y-0 left-0 z-40 w-64 md:w-60 flex-col bg-sidebar text-slate-300 shrink-0 overflow-y-auto">
         <div class="px-5 py-5 border-b border-slate-700/60">
             <div class="flex items-center gap-2.5">
                 <span class="w-9 h-9 rounded-lg bg-brand-600 grid place-items-center text-white">

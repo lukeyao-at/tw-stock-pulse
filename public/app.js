@@ -250,12 +250,12 @@ function renderOverview() {
     : `<table class="w-full text-sm">
         <thead class="bg-slate-50 text-slate-500 text-xs">
           <tr>
-            <th class="text-left font-medium px-5 py-2.5">標的</th>
-            <th class="text-right font-medium px-3 py-2.5">股價</th>
-            <th class="text-right font-medium px-3 py-2.5">漲跌</th>
-            <th class="text-right font-medium px-3 py-2.5 hidden sm:table-cell">本益比</th>
-            <th class="text-right font-medium px-3 py-2.5 hidden sm:table-cell">殖利率</th>
-            <th class="text-center font-medium px-3 py-2.5">新聞</th>
+            <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股價</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">漲跌</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5 hidden sm:table-cell">本益比</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5 hidden sm:table-cell">殖利率</th>
+            <th class="whitespace-nowrap text-center font-medium px-3 py-2.5">新聞</th>
             <th class="px-3 py-2.5"></th>
           </tr>
         </thead>
@@ -374,12 +374,12 @@ function renderHoldings() {
     : `<table class="w-full text-sm">
         <thead class="bg-slate-50 text-slate-500 text-xs">
           <tr>
-            <th class="text-left font-medium px-5 py-2.5">標的</th>
-            <th class="text-right font-medium px-3 py-2.5">股數</th>
-            <th class="text-right font-medium px-3 py-2.5">成本</th>
-            <th class="text-right font-medium px-3 py-2.5">現價</th>
-            <th class="text-right font-medium px-3 py-2.5">市值</th>
-            <th class="text-right font-medium px-3 py-2.5">損益</th>
+            <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股數</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">成本</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">現價</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">市值</th>
+            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">損益</th>
             <th class="px-3 py-2.5"></th>
           </tr>
         </thead>
@@ -649,7 +649,19 @@ function switchTab(name) {
   });
 
   location.hash = name;
+
+  // 手機上選完分頁就把浮層選單收起來，否則會一直蓋住內容
+  if (window.matchMedia('(max-width: 767px)').matches) closeMobileMenu();
 }
+
+function setMobileMenu(open) {
+  const aside = document.querySelector('aside');
+  aside.classList.toggle('hidden', !open);
+  aside.classList.toggle('flex', open);
+  $('backdrop').classList.toggle('hidden', !open);
+}
+
+const closeMobileMenu = () => setMobileMenu(false);
 
 function addToWatchlist(code) {
   if (!code || profile.watchlist.includes(code)) return;
@@ -728,9 +740,9 @@ function initEvents() {
 
   $('refresh').addEventListener('click', refresh);
   $('mobile-menu').addEventListener('click', () => {
-    document.querySelector('aside').classList.toggle('hidden');
-    document.querySelector('aside').classList.toggle('flex');
+    setMobileMenu(document.querySelector('aside').classList.contains('hidden'));
   });
+  $('backdrop').addEventListener('click', closeMobileMenu);
 
   // ── 搜尋
   $('search').addEventListener('input', (event) => {
