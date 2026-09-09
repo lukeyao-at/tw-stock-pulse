@@ -8,7 +8,7 @@
          CSS 由 npm run build:css 從 src/styles.css 產生。 -->
     <link rel="stylesheet" href="/tailwind.css">
 </head>
-<body class="text-slate-800">
+<body class="text-ink">
 
 <!-- SVG 圖示 sprite：自繪 24x24 線條圖示，吃 currentColor。
      取代 FontAwesome CDN，讓離線模式真的能用。 -->
@@ -39,6 +39,9 @@
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5 11-11"/></symbol>
   <symbol id="i-xmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18a9 9 0 1 1 16 0"/><path d="M12 18l5-6"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19"/></symbol>
 </svg>
 
@@ -72,20 +75,23 @@
 
     <!-- ── 主區 ───────────────────────────────────────── -->
     <main class="flex-1 min-w-0">
-        <header class="bg-white border-b border-slate-200 px-4 md:px-8 py-3.5 flex items-center gap-3 sticky top-0 z-20">
-            <button id="mobile-menu" class="md:hidden w-9 h-9 rounded-lg border border-slate-200 text-slate-600">
+        <header class="bg-surface border-b border-line px-4 md:px-8 py-3.5 flex items-center gap-3 sticky top-0 z-20">
+            <button id="mobile-menu" class="md:hidden w-9 h-9 rounded-lg border border-line text-sub">
                 <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-bars"/></svg>
             </button>
 
             <div class="relative flex-1 max-w-md">
-                <svg class="w-3.5 h-3.5 inline-block align-[-0.15em] shrink-0 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true"><use href="#i-search"/></svg>
+                <svg class="w-3.5 h-3.5 inline-block align-[-0.15em] shrink-0 absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true"><use href="#i-search"/></svg>
                 <input id="search" type="search" autocomplete="off" placeholder="輸入代號或名稱加入自選（例：2330、台積電）"
-                       class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none">
-                <div id="search-results" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-auto z-30"></div>
+                       class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-line focus:border-brand-500 focus:ring-2 focus:ring-accent-line outline-none">
+                <div id="search-results" class="hidden absolute left-0 right-0 top-full mt-1 bg-surface border border-line rounded-lg shadow-lg max-h-72 overflow-auto z-30"></div>
             </div>
 
             <div class="ml-auto flex items-center gap-2">
-                <span id="updated" class="hidden sm:inline text-xs text-slate-500 num"></span>
+                <span id="updated" class="hidden sm:inline text-xs text-muted num"></span>
+                <button id="theme-toggle" class="w-9 h-9 rounded-lg border border-line text-muted hover:bg-raised" title="切換主題">
+                    <svg class="w-4 h-4 mx-auto" aria-hidden="true"><use id="theme-icon" href="#i-auto"/></svg>
+                </button>
                 <button id="refresh" class="px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">
                     <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-rotate"/></svg>更新
                 </button>
@@ -102,24 +108,24 @@
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="kpi-cards"></div>
 
                 <div class="grid lg:grid-cols-3 gap-6 mt-6">
-                    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200">
-                        <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                    <div class="lg:col-span-2 bg-surface rounded-xl border border-line">
+                        <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
                             <h2 class="font-semibold">自選股</h2>
-                            <span class="text-xs text-slate-500" id="watch-count"></span>
+                            <span class="text-xs text-muted" id="watch-count"></span>
                         </div>
                         <div class="overflow-x-auto"><div id="watch-table"></div></div>
                     </div>
 
                     <div class="space-y-6">
-                        <div class="bg-white rounded-xl border border-slate-200">
-                            <div class="px-5 py-3.5 border-b border-slate-100">
+                        <div class="bg-surface rounded-xl border border-line">
+                            <div class="px-5 py-3.5 border-b border-line-soft">
                                 <h2 class="font-semibold">觸發中的提醒</h2>
                             </div>
                             <div id="overview-alerts" class="p-5 space-y-2.5"></div>
                         </div>
 
-                        <div class="bg-white rounded-xl border border-slate-200">
-                            <div class="px-5 py-3.5 border-b border-slate-100">
+                        <div class="bg-surface rounded-xl border border-line">
+                            <div class="px-5 py-3.5 border-b border-line-soft">
                                 <h2 class="font-semibold">近期事件</h2>
                             </div>
                             <div id="overview-events" class="p-5 space-y-2.5"></div>
@@ -134,16 +140,16 @@
             <section id="tab-holdings" class="tab-content">
                 <div class="flex flex-wrap items-end gap-3 mb-5">
                     <div>
-                        <label class="block text-xs text-slate-500 mb-1">代號</label>
-                        <input id="h-code" class="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 num" placeholder="2330">
+                        <label class="block text-xs text-muted mb-1">代號</label>
+                        <input id="h-code" class="w-28 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="2330">
                     </div>
                     <div>
-                        <label class="block text-xs text-slate-500 mb-1">股數</label>
-                        <input id="h-shares" type="number" min="1" class="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 num" placeholder="1000">
+                        <label class="block text-xs text-muted mb-1">股數</label>
+                        <input id="h-shares" type="number" min="1" class="w-28 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="1000">
                     </div>
                     <div>
-                        <label class="block text-xs text-slate-500 mb-1">每股成本</label>
-                        <input id="h-cost" type="number" min="0" step="0.01" class="w-32 px-3 py-2 text-sm rounded-lg border border-slate-200 num" placeholder="950">
+                        <label class="block text-xs text-muted mb-1">每股成本</label>
+                        <input id="h-cost" type="number" min="0" step="0.01" class="w-32 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="950">
                     </div>
                     <button id="h-add" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">
                         <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-plus"/></svg>新增持股
@@ -152,16 +158,16 @@
 
                 <div class="grid lg:grid-cols-4 gap-4 mb-6" id="portfolio-kpi"></div>
 
-                <div class="bg-white rounded-xl border border-slate-200">
-                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                <div class="bg-surface rounded-xl border border-line">
+                    <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
                         <h2 class="font-semibold">持股明細</h2>
-                        <span class="text-xs text-slate-500" id="fee-note"></span>
+                        <span class="text-xs text-muted" id="fee-note"></span>
                     </div>
                     <div class="overflow-x-auto"><div id="holdings-table"></div></div>
                 </div>
 
-                <div class="bg-white rounded-xl border border-slate-200 mt-6">
-                    <div class="px-5 py-3.5 border-b border-slate-100">
+                <div class="bg-surface rounded-xl border border-line mt-6">
+                    <div class="px-5 py-3.5 border-b border-line-soft">
                         <h2 class="font-semibold">產業集中度</h2>
                     </div>
                     <div id="concentration" class="p-5 space-y-3"></div>
@@ -176,50 +182,50 @@
                 </div>
                 <div id="news-personalized" class="space-y-3"></div>
 
-                <h3 class="font-semibold mt-8 mb-3 text-slate-600 text-sm">其他市場新聞</h3>
+                <h3 class="font-semibold mt-8 mb-3 text-sub text-sm">其他市場新聞</h3>
                 <div id="news-others" class="space-y-3"></div>
             </section>
 
             <!-- ═══ 推薦 ═══ -->
             <section id="tab-recommend" class="tab-content">
-                <div class="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+                <div class="bg-surface rounded-xl border border-line p-5 mb-6">
                     <h2 class="font-semibold mb-4">你的偏好</h2>
                     <div class="grid md:grid-cols-2 gap-6">
                         <div>
-                            <label class="block text-xs text-slate-500 mb-2">風險偏好</label>
+                            <label class="block text-xs text-muted mb-2">風險偏好</label>
                             <div class="flex gap-1.5" id="risk-picker"></div>
                         </div>
                         <div>
-                            <label class="block text-xs text-slate-500 mb-2">投資目標（可多選）</label>
+                            <label class="block text-xs text-muted mb-2">投資目標（可多選）</label>
                             <div class="flex gap-1.5" id="goal-picker"></div>
                         </div>
                     </div>
-                    <div class="mt-5 pt-4 border-t border-slate-100">
-                        <div class="text-xs text-slate-500 mb-2">目前的因子權重</div>
+                    <div class="mt-5 pt-4 border-t border-line-soft">
+                        <div class="text-xs text-muted mb-2">目前的因子權重</div>
                         <div id="weights" class="flex flex-wrap gap-2"></div>
                     </div>
                 </div>
 
                 <div id="recommend-list" class="grid md:grid-cols-2 gap-4"></div>
-                <p id="recommend-disclaimer" class="text-xs text-slate-500 mt-6 leading-relaxed"></p>
+                <p id="recommend-disclaimer" class="text-xs text-muted mt-6 leading-relaxed"></p>
             </section>
 
             <!-- ═══ 提醒 ═══ -->
             <section id="tab-alerts" class="tab-content">
-                <div class="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+                <div class="bg-surface rounded-xl border border-line p-5 mb-6">
                     <h2 class="font-semibold mb-4">新增提醒</h2>
                     <div class="flex flex-wrap items-end gap-3">
                         <div>
-                            <label class="block text-xs text-slate-500 mb-1">標的</label>
-                            <select id="a-code" class="w-40 px-3 py-2 text-sm rounded-lg border border-slate-200"></select>
+                            <label class="block text-xs text-muted mb-1">標的</label>
+                            <select id="a-code" class="w-40 px-3 py-2 text-sm rounded-lg border border-line"></select>
                         </div>
                         <div>
-                            <label class="block text-xs text-slate-500 mb-1">條件</label>
-                            <select id="a-type" class="w-56 px-3 py-2 text-sm rounded-lg border border-slate-200"></select>
+                            <label class="block text-xs text-muted mb-1">條件</label>
+                            <select id="a-type" class="w-56 px-3 py-2 text-sm rounded-lg border border-line"></select>
                         </div>
                         <div id="a-value-wrap">
-                            <label class="block text-xs text-slate-500 mb-1">數值 <span id="a-unit" class="text-slate-400"></span></label>
-                            <input id="a-value" type="number" step="0.01" class="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 num">
+                            <label class="block text-xs text-muted mb-1">數值 <span id="a-unit" class="text-faint"></span></label>
+                            <input id="a-value" type="number" step="0.01" class="w-28 px-3 py-2 text-sm rounded-lg border border-line num">
                         </div>
                         <button id="a-add" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">
                             <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-bell"/></svg>新增
@@ -228,12 +234,12 @@
                 </div>
 
                 <div class="grid lg:grid-cols-2 gap-6">
-                    <div class="bg-white rounded-xl border border-slate-200">
-                        <div class="px-5 py-3.5 border-b border-slate-100"><h2 class="font-semibold">觸發中</h2></div>
+                    <div class="bg-surface rounded-xl border border-line">
+                        <div class="px-5 py-3.5 border-b border-line-soft"><h2 class="font-semibold">觸發中</h2></div>
                         <div id="alerts-triggered" class="p-5 space-y-2.5"></div>
                     </div>
-                    <div class="bg-white rounded-xl border border-slate-200">
-                        <div class="px-5 py-3.5 border-b border-slate-100"><h2 class="font-semibold">所有規則</h2></div>
+                    <div class="bg-surface rounded-xl border border-line">
+                        <div class="px-5 py-3.5 border-b border-line-soft"><h2 class="font-semibold">所有規則</h2></div>
                         <div id="alerts-rules" class="p-5 space-y-2"></div>
                     </div>
                 </div>
@@ -242,28 +248,28 @@
             <!-- ═══ 設定 ═══ -->
             <section id="tab-settings" class="tab-content">
                 <div class="max-w-2xl space-y-6">
-                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                    <div class="bg-surface rounded-xl border border-line p-5">
                         <h2 class="font-semibold mb-1">你的資料存在哪裡</h2>
-                        <p class="text-sm text-slate-600 leading-relaxed">
+                        <p class="text-sm text-sub leading-relaxed">
                             自選股、持股與提醒規則全部存在<strong>這台瀏覽器的 localStorage</strong>，
                             每次查詢時才隨請求送到本機伺服器計算。伺服器不寫入任何資料庫、不設 cookie、
                             不保留你的持股明細。
                         </p>
                         <div class="flex gap-2 mt-4">
-                            <button id="export" class="px-3.5 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">
+                            <button id="export" class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised">
                                 <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-download"/></svg>匯出設定
                             </button>
-                            <label class="px-3.5 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                            <label class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised cursor-pointer">
                                 <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-upload"/></svg>匯入設定
                                 <input id="import" type="file" accept="application/json" class="hidden">
                             </label>
-                            <button id="reset" class="px-3.5 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+                            <button id="reset" class="px-3.5 py-2 text-sm rounded-lg border border-danger-line text-danger hover:bg-danger-bg">
                                 <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-trash"/></svg>清除全部
                             </button>
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                    <div class="bg-surface rounded-xl border border-line p-5">
                         <h2 class="font-semibold mb-4">計算參數</h2>
                         <label class="flex items-center justify-between py-2">
                             <span class="text-sm">損益計入手續費與證交稅</span>
@@ -271,20 +277,20 @@
                         </label>
                         <label class="flex items-center justify-between py-2">
                             <span class="text-sm">手續費折扣（0.6 = 六折）</span>
-                            <input id="s-discount" type="number" min="0.1" max="1" step="0.05" class="w-24 px-2 py-1.5 text-sm rounded border border-slate-200 num">
+                            <input id="s-discount" type="number" min="0.1" max="1" step="0.05" class="w-24 px-2 py-1.5 text-sm rounded border border-line num">
                         </label>
                         <label class="flex items-center justify-between py-2">
                             <span class="text-sm">自動更新間隔（秒，0 = 關閉）</span>
-                            <input id="s-interval" type="number" min="0" step="10" class="w-24 px-2 py-1.5 text-sm rounded border border-slate-200 num">
+                            <input id="s-interval" type="number" min="0" step="10" class="w-24 px-2 py-1.5 text-sm rounded border border-line num">
                         </label>
                     </div>
 
-                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                    <div class="bg-surface rounded-xl border border-line p-5">
                         <h2 class="font-semibold mb-3">資料來源健康度</h2>
                         <div id="diagnostics" class="space-y-2 text-sm"></div>
                     </div>
 
-                    <p class="text-xs text-slate-500 leading-relaxed">
+                    <p class="text-xs text-muted leading-relaxed">
                         本工具僅整理公開資訊並依你設定的條件排序，不構成投資建議，也不保證資料即時或正確。
                         投資決策請自行核實資料並承擔風險。
                     </p>

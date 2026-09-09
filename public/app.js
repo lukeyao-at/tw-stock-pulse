@@ -19,7 +19,20 @@ const DEFAULT_PROFILE = {
   feeDiscount: 0.6,
   refreshSeconds: 60,
   newsFilter: 'all',
+  theme: 'system',
 };
+
+/**
+ * 主題三段循環：跟隨系統 → 深色 → 淺色。
+ *
+ * 「跟隨系統」不在 root 上留任何標記，交給 CSS 的 prefers-color-scheme
+ * 決定；選了明確的深或淺才寫 data-theme，讓它蓋過系統設定。
+ */
+const THEMES = [
+  ['system', '跟隨系統', 'auto'],
+  ['dark', '深色', 'moon'],
+  ['light', '淺色', 'sun'],
+];
 
 const RISKS = [
   ['conservative', '保守', '重視股利與流動性'],
@@ -86,6 +99,25 @@ function saveProfile() {
 
 // ── 小工具 ───────────────────────────────────────────
 
+/**
+ * 套用主題。
+ *
+ * 「跟隨系統」刻意不在 root 上留任何標記，讓 CSS 的 prefers-color-scheme
+ * 決定；只有明確選深或淺才寫 data-theme，蓋過系統設定。
+ */
+function applyTheme(mode) {
+  const [, label, icon] = THEMES.find(([key]) => key === mode) || THEMES[0];
+
+  if (mode === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = mode;
+
+  const use = document.getElementById('theme-icon');
+  if (use) use.setAttribute('href', `#i-${icon}`);
+
+  const button = document.getElementById('theme-toggle');
+  if (button) button.title = `主題：${label}（點擊切換）`;
+}
+
 const $ = (id) => document.getElementById(id);
 
 /** 一律escape，新聞標題與公司名稱都來自外部來源 */
@@ -114,7 +146,7 @@ function fmtMoney(n) {
 /** 紅漲綠跌 */
 const trendClass = (n) =>
   typeof n !== 'number' || !Number.isFinite(n) || n === 0
-    ? 'text-slate-500'
+    ? 'text-muted'
     : n > 0 ? 'text-up' : 'text-down';
 
 const signed = (n, digits = 2) =>
@@ -131,13 +163,13 @@ const timeAgo = (iso) => {
 };
 
 const SENTIMENT_STYLE = {
-  利多: 'bg-red-50 text-up border-red-200',
-  利空: 'bg-green-50 text-down border-green-200',
-  中性: 'bg-slate-50 text-slate-500 border-slate-200',
+  利多: 'bg-up-bg text-up border-up-line',
+  利空: 'bg-down-bg text-down border-down-line',
+  中性: 'bg-raised text-muted border-line',
 };
 
 function emptyState(text, icon = 'inbox') {
-  return `<div class="py-8 text-center text-slate-400 text-sm">
+  return `<div class="py-8 text-center text-faint text-sm">
     <svg class="w-7 h-7 mb-2 mx-auto block opacity-50" aria-hidden="true"><use href="#i-${icon}"/></svg>${esc(text)}</div>`;
 }
 
@@ -176,8 +208,8 @@ async function refresh() {
 
 function showBanner(kind, message, notes = []) {
   const styles = {
-    error: 'bg-red-50 border-red-200 text-red-800',
-    warn: 'bg-amber-50 border-amber-200 text-amber-900',
+    error: 'bg-danger-bg border-danger-line text-danger',
+    warn: 'bg-warn-bg border-warn-line text-warn',
   };
   $('banner').innerHTML = `
     <div class="rounded-lg border px-4 py-3 text-sm ${styles[kind] || styles.warn}">
@@ -234,13 +266,13 @@ function renderOverview() {
   ];
 
   $('kpi-cards').innerHTML = cards.map((c) => `
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
+    <div class="bg-surface rounded-xl border border-line p-4">
       <div class="flex items-start justify-between">
-        <span class="text-xs text-slate-500">${esc(c.label)}</span>
-        <svg class="w-4 h-4 text-slate-300 shrink-0" aria-hidden="true"><use href="#i-${c.icon}"/></svg>
+        <span class="text-xs text-muted">${esc(c.label)}</span>
+        <svg class="w-4 h-4 text-dim shrink-0" aria-hidden="true"><use href="#i-${c.icon}"/></svg>
       </div>
       <div class="mt-2 text-xl font-semibold num ${c.trend !== undefined ? trendClass(c.trend) : ''}">${esc(c.value)}</div>
-      <div class="text-xs text-slate-500 mt-0.5 num">${esc(c.sub)}</div>
+      <div class="text-xs text-muted mt-0.5 num">${esc(c.sub)}</div>
     </div>`).join('');
 
   // ── 自選股表格
@@ -248,7 +280,7 @@ function renderOverview() {
   $('watch-table').innerHTML = latest.watchlist.length === 0
     ? emptyState('還沒有自選股，用上方搜尋框加入', 'star')
     : `<table class="w-full text-sm">
-        <thead class="bg-slate-50 text-slate-500 text-xs">
+        <thead class="bg-raised text-muted text-xs">
           <tr>
             <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
             <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股價</th>
@@ -259,29 +291,29 @@ function renderOverview() {
             <th class="px-3 py-2.5"></th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody class="divide-y divide-line-soft">
           ${latest.watchlist.map((s) => `
-            <tr class="hover:bg-slate-50">
+            <tr class="hover:bg-raised">
               <td class="px-5 py-3">
                 <div class="font-medium">${esc(s.name)}</div>
-                <div class="text-xs text-slate-500 num">${esc(s.code)}
-                  ${s.industry ? `<span class="ml-1 text-slate-400">${esc(s.industry)}</span>` : ''}
-                  ${s.unknown ? '<span class="ml-1 text-amber-600">查無資料</span>' : ''}
+                <div class="text-xs text-muted num">${esc(s.code)}
+                  ${s.industry ? `<span class="ml-1 text-faint">${esc(s.industry)}</span>` : ''}
+                  ${s.unknown ? '<span class="ml-1 text-warn">查無資料</span>' : ''}
                 </div>
               </td>
               <td class="px-3 py-3 text-right num font-medium">${fmt(s.price)}
-                ${s.priceSource === '盤中推估' ? '<div class="text-[10px] text-slate-400">推估</div>' : ''}
+                ${s.priceSource === '盤中推估' ? '<div class="text-[10px] text-faint">推估</div>' : ''}
               </td>
               <td class="px-3 py-3 text-right num ${trendClass(s.changePercent)}">
                 ${signed(s.change)}<div class="text-xs">${signed(s.changePercent)}%</div>
               </td>
-              <td class="px-3 py-3 text-right num hidden sm:table-cell text-slate-600">${fmt(s.peRatio, 1)}</td>
-              <td class="px-3 py-3 text-right num hidden sm:table-cell text-slate-600">${s.dividendYield !== null ? fmt(s.dividendYield) + '%' : '—'}</td>
+              <td class="px-3 py-3 text-right num hidden sm:table-cell text-sub">${fmt(s.peRatio, 1)}</td>
+              <td class="px-3 py-3 text-right num hidden sm:table-cell text-sub">${s.dividendYield !== null ? fmt(s.dividendYield) + '%' : '—'}</td>
               <td class="px-3 py-3 text-center">
-                ${s.newsCount > 0 ? `<span class="inline-block px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs num">${s.newsCount}</span>` : '<span class="text-slate-300">—</span>'}
+                ${s.newsCount > 0 ? `<span class="inline-block px-2 py-0.5 rounded-full bg-accent-bg text-accent-ink text-xs num">${s.newsCount}</span>` : '<span class="text-dim">—</span>'}
               </td>
               <td class="px-3 py-3 text-right">
-                <button data-remove-watch="${esc(s.code)}" class="text-slate-400 hover:text-red-600 px-1" title="移除">
+                <button data-remove-watch="${esc(s.code)}" class="text-faint hover:text-danger px-1" title="移除">
                   <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
                 </button>
               </td>
@@ -298,10 +330,10 @@ function renderOverview() {
     ? emptyState('30 天內沒有相關事件', 'calendar')
     : events.slice(0, 6).map((e) => `
         <div class="flex items-start gap-2.5 text-sm">
-          <span class="mt-0.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] shrink-0">${esc(e.kind)}</span>
+          <span class="mt-0.5 px-1.5 py-0.5 rounded bg-track text-sub text-[11px] shrink-0">${esc(e.kind)}</span>
           <div class="min-w-0">
             <div class="truncate">${esc(e.name || e.code)}</div>
-            <div class="text-xs text-slate-500 num">${esc(e.date)}${e.detail ? ` · ${esc(e.detail)}` : ''}</div>
+            <div class="text-xs text-muted num">${esc(e.date)}${e.detail ? ` · ${esc(e.detail)}` : ''}</div>
           </div>
         </div>`).join('');
 
@@ -309,28 +341,28 @@ function renderOverview() {
   const movers = [
     ['漲幅前五', market.topGainers, 'arrow-up text-up'],
     ['跌幅前五', market.topLosers, 'arrow-down text-down'],
-    ['成交值前五', market.mostActive, 'fire text-amber-500'],
+    ['成交值前五', market.mostActive, 'fire text-warn-strong'],
   ];
   $('market-movers').innerHTML = movers.map(([title, rows, icon]) => {
     const [iconName, ...iconRest] = icon.split(' ');
     const iconClass = iconRest.join(' ');
     return `
-    <div class="bg-white rounded-xl border border-slate-200">
-      <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2">
+    <div class="bg-surface rounded-xl border border-line">
+      <div class="px-5 py-3.5 border-b border-line-soft flex items-center gap-2">
         <svg class="w-4 h-4 shrink-0 ${iconClass}" aria-hidden="true"><use href="#i-${iconName}"/></svg><h2 class="font-semibold text-sm">${esc(title)}</h2>
       </div>
-      <div class="divide-y divide-slate-100">
+      <div class="divide-y divide-line-soft">
         ${rows.map((s) => `
           <div class="px-5 py-2.5 flex items-center justify-between text-sm">
             <div class="min-w-0">
               <div class="truncate font-medium">${esc(s.name)}</div>
-              <div class="text-xs text-slate-500 num">${esc(s.code)}</div>
+              <div class="text-xs text-muted num">${esc(s.code)}</div>
             </div>
             <div class="text-right shrink-0 ml-2">
               <div class="num">${fmt(s.close)}</div>
               <div class="text-xs num ${trendClass(s.changePercent)}">${signed(s.changePercent)}%</div>
             </div>
-            <button data-add-watch="${esc(s.code)}" class="ml-3 text-slate-300 hover:text-brand-600" title="加入自選">
+            <button data-add-watch="${esc(s.code)}" class="ml-3 text-dim hover:text-brand-600" title="加入自選">
               <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-plus"/></svg>
             </button>
           </div>`).join('')}
@@ -343,13 +375,13 @@ function alertRow(a) {
   // 台股紅漲綠跌：warning（下跌/利空）走綠、info（上漲/利多）走紅，
   // neutral（除權息、法說會等無方向性事件）走灰。
   const tone = {
-    warning: 'bg-green-50 border-green-200',
-    neutral: 'bg-slate-50 border-slate-200',
-  }[a.severity] || 'bg-red-50 border-red-200';
+    warning: 'bg-down-bg border-down-line',
+    neutral: 'bg-raised border-line',
+  }[a.severity] || 'bg-up-bg border-up-line';
   return `<div class="rounded-lg border ${tone} px-3 py-2.5 text-sm">
     <div>${esc(a.message)}</div>
     ${a.news ? a.news.map((n) => `<a href="${esc(n.link)}" target="_blank" rel="noopener"
-        class="block mt-1 text-xs text-brand-700 hover:underline truncate">${esc(n.title)}</a>`).join('') : ''}
+        class="block mt-1 text-xs text-accent-ink hover:underline truncate">${esc(n.title)}</a>`).join('') : ''}
   </div>`;
 }
 
@@ -362,8 +394,8 @@ function renderHoldings() {
     ['未實現損益', fmtMoney(pf.summary.totalProfit), pf.summary.totalProfit],
     ['報酬率', pf.summary.totalProfitPercent !== null ? `${signed(pf.summary.totalProfitPercent)}%` : '—', pf.summary.totalProfit],
   ].map(([label, value, trend]) => `
-    <div class="bg-white rounded-xl border border-slate-200 p-4">
-      <div class="text-xs text-slate-500">${esc(label)}</div>
+    <div class="bg-surface rounded-xl border border-line p-4">
+      <div class="text-xs text-muted">${esc(label)}</div>
       <div class="mt-1.5 text-xl font-semibold num ${trend !== null ? trendClass(trend) : ''}">${esc(value)}</div>
     </div>`).join('');
 
@@ -372,7 +404,7 @@ function renderHoldings() {
   $('holdings-table').innerHTML = pf.positions.length === 0
     ? emptyState('還沒有持股，用上方欄位新增', 'wallet')
     : `<table class="w-full text-sm">
-        <thead class="bg-slate-50 text-slate-500 text-xs">
+        <thead class="bg-raised text-muted text-xs">
           <tr>
             <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
             <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股數</th>
@@ -383,14 +415,14 @@ function renderHoldings() {
             <th class="px-3 py-2.5"></th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody class="divide-y divide-line-soft">
           ${pf.positions.map((p) => `
-            <tr class="hover:bg-slate-50 ${p.unknown ? 'opacity-60' : ''}">
+            <tr class="hover:bg-raised ${p.unknown ? 'opacity-60' : ''}">
               <td class="px-5 py-3">
                 <div class="font-medium">${esc(p.name)}</div>
-                <div class="text-xs text-slate-500 num">${esc(p.code)}
-                  ${p.unknown ? '<span class="ml-1 text-amber-600">查無此代號</span>'
-                              : p.priceSource ? `<span class="ml-1 text-slate-400">${esc(p.priceSource)}</span>` : ''}
+                <div class="text-xs text-muted num">${esc(p.code)}
+                  ${p.unknown ? '<span class="ml-1 text-warn">查無此代號</span>'
+                              : p.priceSource ? `<span class="ml-1 text-faint">${esc(p.priceSource)}</span>` : ''}
                 </div>
               </td>
               <td class="px-3 py-3 text-right num">${fmtInt(p.shares)}</td>
@@ -402,7 +434,7 @@ function renderHoldings() {
                 <div class="text-xs">${p.profitPercent !== null ? signed(p.profitPercent) + '%' : ''}</div>
               </td>
               <td class="px-3 py-3 text-right">
-                <button data-remove-holding="${esc(p.code)}" class="text-slate-400 hover:text-red-600 px-1" title="移除">
+                <button data-remove-holding="${esc(p.code)}" class="text-faint hover:text-danger px-1" title="移除">
                   <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
                 </button>
               </td>
@@ -417,14 +449,14 @@ function renderHoldings() {
         <div>
           <div class="flex justify-between text-sm mb-1">
             <span>${esc(c.industry)}</span>
-            <span class="num ${c.percent > 40 ? 'text-amber-600 font-medium' : 'text-slate-600'}">${fmt(c.percent, 1)}%</span>
+            <span class="num ${c.percent > 40 ? 'text-warn font-medium' : 'text-sub'}">${fmt(c.percent, 1)}%</span>
           </div>
-          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div class="h-full ${c.percent > 40 ? 'bg-amber-500' : 'bg-brand-500'}" style="width:${Math.min(100, c.percent)}%"></div>
+          <div class="h-2 bg-track rounded-full overflow-hidden">
+            <div class="h-full ${c.percent > 40 ? 'bg-warn-strong' : 'bg-brand-500'}" style="width:${Math.min(100, c.percent)}%"></div>
           </div>
         </div>`).join('')
       + (pf.topConcentration && pf.topConcentration.percent > 40
-        ? `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+        ? `<p class="text-xs text-warn bg-warn-bg border border-warn-line rounded-lg px-3 py-2 mt-3">
              <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-warning"/></svg>
              ${esc(pf.topConcentration.industry)}占比 ${fmt(pf.topConcentration.percent, 1)}%，產業集中度偏高。
              「推薦標的」分頁會優先推你尚未持有的產業。</p>`
@@ -434,16 +466,16 @@ function renderHoldings() {
 function renderNews() {
   const { personalized, others, mood } = latest.news;
 
-  const moodStyle = mood.mood === '偏多' ? 'text-up' : mood.mood === '偏空' ? 'text-down' : 'text-slate-500';
+  const moodStyle = mood.mood === '偏多' ? 'text-up' : mood.mood === '偏空' ? 'text-down' : 'text-muted';
   $('news-mood').innerHTML = `
-    <span class="text-slate-500">自選股新聞氛圍</span>
+    <span class="text-muted">自選股新聞氛圍</span>
     <span class="ml-2 font-semibold ${moodStyle}">${esc(mood.mood)}</span>
-    <span class="ml-2 text-xs text-slate-500 num">（利多 ${mood.counts.利多} · 利空 ${mood.counts.利空} · 中性 ${mood.counts.中性}）</span>`;
+    <span class="ml-2 text-xs text-muted num">（利多 ${mood.counts.利多} · 利空 ${mood.counts.利空} · 中性 ${mood.counts.中性}）</span>`;
 
   const filters = [['all', '全部'], ['利多', '利多'], ['利空', '利空']];
   $('news-filters').innerHTML = filters.map(([key, label]) => `
     <button data-news-filter="${key}" class="px-3 py-1.5 text-xs rounded-lg border ${
-      profile.newsFilter === key ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 text-slate-600'
+      profile.newsFilter === key ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub'
     }">${esc(label)}</button>`).join('');
 
   const shown = profile.newsFilter === 'all'
@@ -463,7 +495,7 @@ function renderNews() {
 
 function newsCard(n) {
   const s = n.sentiment;
-  return `<article class="bg-white rounded-xl border border-slate-200 p-4">
+  return `<article class="bg-surface rounded-xl border border-line p-4">
     <div class="flex items-start gap-3">
       <span class="shrink-0 px-2 py-0.5 rounded border text-xs ${SENTIMENT_STYLE[s.label]}">${esc(s.label)}</span>
       <div class="min-w-0 flex-1">
@@ -471,16 +503,16 @@ function newsCard(n) {
           ${n.link ? `<a href="${esc(n.link)}" target="_blank" rel="noopener" class="hover:text-brand-700">${esc(n.title)}</a>`
                    : esc(n.title)}
         </h3>
-        ${n.summary ? `<p class="text-sm text-slate-600 mt-1 leading-relaxed line-clamp-2">${esc(n.summary)}</p>` : ''}
+        ${n.summary ? `<p class="text-sm text-sub mt-1 leading-relaxed line-clamp-2">${esc(n.summary)}</p>` : ''}
         <div class="flex flex-wrap items-center gap-1.5 mt-2 text-xs">
           ${n.matchedSymbols.map((m) => `
-            <span class="px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 num" title="比對方式：${esc(m.via)}">
+            <span class="px-1.5 py-0.5 rounded bg-accent-bg text-accent-ink num" title="比對方式：${esc(m.via)}">
               ${esc(m.code)}
             </span>`).join('')}
-          <span class="text-slate-400">${esc(n.source || '')}</span>
-          <span class="text-slate-400">${esc(timeAgo(n.publishedAt))}</span>
-          ${s.hedged ? '<span class="text-amber-600" title="標題含「傳」「可能」等推測語氣，情緒分數已打折">推測語氣</span>' : ''}
-          ${s.matched.length ? `<span class="text-slate-400">關鍵詞：${esc(s.matched.join('、'))}</span>` : ''}
+          <span class="text-faint">${esc(n.source || '')}</span>
+          <span class="text-faint">${esc(timeAgo(n.publishedAt))}</span>
+          ${s.hedged ? '<span class="text-warn" title="標題含「傳」「可能」等推測語氣，情緒分數已打折">推測語氣</span>' : ''}
+          ${s.matched.length ? `<span class="text-faint">關鍵詞：${esc(s.matched.join('、'))}</span>` : ''}
         </div>
       </div>
     </div>
@@ -492,31 +524,31 @@ function renderRecommend() {
 
   $('risk-picker').innerHTML = RISKS.map(([key, label, hint]) => `
     <button data-risk="${key}" title="${esc(hint)}" class="px-3.5 py-2 text-sm rounded-lg border ${
-      profile.risk === key ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+      profile.risk === key ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub hover:bg-raised'
     }">${esc(label)}</button>`).join('');
 
   $('goal-picker').innerHTML = GOALS.map(([key, label]) => `
     <button data-goal="${key}" class="px-3.5 py-2 text-sm rounded-lg border ${
-      profile.goals.includes(key) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+      profile.goals.includes(key) ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub hover:bg-raised'
     }">${esc(label)}</button>`).join('');
 
   $('weights').innerHTML = Object.entries(r.weights)
     .sort((a, b) => b[1] - a[1])
     .map(([factor, weight]) => `
-      <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-xs num">
+      <span class="px-2.5 py-1 rounded-lg bg-track text-xs num">
         ${esc(FACTOR_LABELS[factor] || factor)} ${(weight * 100).toFixed(0)}%
       </span>`).join('');
 
   $('recommend-list').innerHTML = r.items.length === 0
     ? emptyState('沒有符合條件的標的', 'lightbulb')
     : r.items.map((item) => `
-        <div class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="bg-surface rounded-xl border border-line p-4">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="font-semibold">${esc(item.name)}
-                <span class="text-sm text-slate-500 num ml-1">${esc(item.code)}</span>
+                <span class="text-sm text-muted num ml-1">${esc(item.code)}</span>
               </div>
-              <div class="text-xs text-slate-500 mt-0.5">
+              <div class="text-xs text-muted mt-0.5">
                 ${esc(item.market || '')}${item.industry ? ` · ${esc(item.industry)}` : ''}
                 ${item.topFactor ? ` · 主因：${esc(FACTOR_LABELS[item.topFactor] || item.topFactor)}` : ''}
               </div>
@@ -528,30 +560,30 @@ function renderRecommend() {
           </div>
 
           <div class="mt-3 flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="flex-1 h-1.5 bg-track rounded-full overflow-hidden">
               <div class="h-full score-bar" style="width:${Math.round(item.score * 100)}%"></div>
             </div>
-            <span class="text-xs text-slate-500 num">${(item.score * 100).toFixed(0)} 分</span>
+            <span class="text-xs text-muted num">${(item.score * 100).toFixed(0)} 分</span>
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600 num">
+          <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-sub num">
             <span>本益比 ${fmt(item.peRatio, 1)}</span>
             <span>殖利率 ${item.dividendYield !== null ? fmt(item.dividendYield) + '%' : '—'}</span>
             <span>淨值比 ${fmt(item.pbRatio)}</span>
           </div>
 
           ${item.reasons.length ? `<ul class="mt-3 space-y-1">
-            ${item.reasons.map((reason) => `<li class="text-sm text-slate-700 flex gap-1.5">
+            ${item.reasons.map((reason) => `<li class="text-sm text-ink flex gap-1.5">
               <svg class="w-3 h-3 inline-block align-[-0.15em] shrink-0 text-brand-500 mt-1" aria-hidden="true"><use href="#i-check"/></svg><span>${esc(reason)}</span></li>`).join('')}
           </ul>` : ''}
 
           ${item.cautions.length ? `<ul class="mt-2 space-y-1">
-            ${item.cautions.map((c) => `<li class="text-sm text-amber-700 flex gap-1.5">
+            ${item.cautions.map((c) => `<li class="text-sm text-warn flex gap-1.5">
               <svg class="w-3 h-3 inline-block align-[-0.15em] shrink-0 mt-1" aria-hidden="true"><use href="#i-warning"/></svg><span>${esc(c)}</span></li>`).join('')}
           </ul>` : ''}
 
           <button data-add-watch="${esc(item.code)}"
-                  class="mt-3 w-full py-2 text-sm rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50">
+                  class="mt-3 w-full py-2 text-sm rounded-lg border border-accent-line text-accent-ink hover:bg-accent-bg">
             <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-star"/></svg>加入自選
           </button>
         </div>`).join('');
@@ -594,12 +626,12 @@ function renderAlerts() {
                  class="w-4 h-4 accent-brand-600 shrink-0">
           <div class="min-w-0 flex-1 ${rule.enabled === false ? 'opacity-50' : ''}">
             <span class="num">${esc(rule.code)}</span>
-            <span class="text-slate-600">${esc(stock ? stock.name : '')}</span>
-            <span class="text-slate-500">${esc(t.label)}</span>
+            <span class="text-sub">${esc(stock ? stock.name : '')}</span>
+            <span class="text-muted">${esc(t.label)}</span>
             ${t.needsValue ? `<span class="num font-medium">${esc(rule.value)}${esc(t.unit)}</span>` : ''}
-            ${isSkipped ? `<div class="text-xs text-amber-600">無法評估：${esc(skipped.get(rule.id))}</div>` : ''}
+            ${isSkipped ? `<div class="text-xs text-warn">無法評估：${esc(skipped.get(rule.id))}</div>` : ''}
           </div>
-          <button data-remove-rule="${esc(rule.id)}" class="text-slate-400 hover:text-red-600 px-1 shrink-0">
+          <button data-remove-rule="${esc(rule.id)}" class="text-faint hover:text-danger px-1 shrink-0">
             <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
           </button>
         </div>`;
@@ -616,16 +648,16 @@ function renderDiagnostics() {
 
   $('diagnostics').innerHTML = rows.map(([k, v]) => `
       <div class="flex justify-between gap-3">
-        <span class="text-slate-500">${esc(k)}</span><span class="num text-right">${esc(v)}</span>
+        <span class="text-muted">${esc(k)}</span><span class="num text-right">${esc(v)}</span>
       </div>`).join('')
     + (d.sourceErrors.length
-      ? `<div class="pt-2 mt-2 border-t border-slate-100">
-           <div class="text-slate-500 mb-1">來源訊息</div>
-           <ul class="space-y-1 text-xs text-amber-700 list-disc list-inside">
+      ? `<div class="pt-2 mt-2 border-t border-line-soft">
+           <div class="text-muted mb-1">來源訊息</div>
+           <ul class="space-y-1 text-xs text-warn list-disc list-inside">
              ${d.sourceErrors.map((e) => `<li>${esc(e)}</li>`).join('')}
            </ul>
          </div>`
-      : '<div class="pt-2 mt-2 border-t border-slate-100 text-xs text-emerald-700">所有來源正常</div>');
+      : '<div class="pt-2 mt-2 border-t border-line-soft text-xs text-ok">所有來源正常</div>');
 }
 
 // ── 互動 ─────────────────────────────────────────────
@@ -739,6 +771,13 @@ function initEvents() {
   });
 
   $('refresh').addEventListener('click', refresh);
+
+  $('theme-toggle').addEventListener('click', () => {
+    const at = THEMES.findIndex(([key]) => key === profile.theme);
+    profile.theme = THEMES[(at + 1) % THEMES.length][0];
+    saveProfile();
+    applyTheme(profile.theme);
+  });
   $('mobile-menu').addEventListener('click', () => {
     setMobileMenu(document.querySelector('aside').classList.contains('hidden'));
   });
@@ -758,14 +797,14 @@ function initEvents() {
         const { results } = await res.json();
 
         $('search-results').innerHTML = results.length === 0
-          ? '<div class="px-3 py-3 text-sm text-slate-500">查無符合的標的</div>'
+          ? '<div class="px-3 py-3 text-sm text-muted">查無符合的標的</div>'
           : results.map((s) => `
               <button data-add-watch="${esc(s.code)}"
-                      class="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex items-center justify-between gap-2">
+                      class="w-full text-left px-3 py-2.5 hover:bg-raised flex items-center justify-between gap-2">
                 <span class="min-w-0">
                   <span class="font-medium">${esc(s.name)}</span>
-                  <span class="text-xs text-slate-500 num ml-1.5">${esc(s.code)}</span>
-                  <span class="text-xs text-slate-400 ml-1">${esc(s.industry || s.market || '')}</span>
+                  <span class="text-xs text-muted num ml-1.5">${esc(s.code)}</span>
+                  <span class="text-xs text-faint ml-1">${esc(s.industry || s.market || '')}</span>
                 </span>
                 <span class="text-xs num shrink-0 ${trendClass(s.changePercent)}">${signed(s.changePercent)}%</span>
               </button>`).join('');
@@ -883,7 +922,9 @@ function scheduleRefresh() {
 
 // ── 啟動 ─────────────────────────────────────────────
 
+applyTheme(profile.theme);
 initEvents();
+applyTheme(profile.theme);   // 按鈕是 initEvents 之後才存在，圖示要再同步一次
 switchTab(location.hash.replace('#', '') || 'overview');
 refresh();
 scheduleRefresh();

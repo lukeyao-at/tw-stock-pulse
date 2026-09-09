@@ -2,11 +2,154 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * 主題色值。
+ *
+ * 三種狀態都要涵蓋：
+ *  1. 未指定 → 跟隨系統的 prefers-color-scheme
+ *  2. data-theme="light" → 強制亮色（即使系統是深色）
+ *  3. data-theme="dark"  → 強制深色（即使系統是亮色）
+ *
+ * 所有 token 都先在裸 :root 定義完整一套，媒體查詢與屬性選擇器只做覆寫。
+ * 若某個顏色「只」定義在深色區塊裡，未指定主題時就會拿不到值，
+ * 造成一個主題的文字配另一個主題的底色 —— 這是深色模式最典型的 bug。
+ */
+:root {
+  --c-sidebar: 15 23 42;
+
+  --c-canvas: 248 250 252;
+  --c-surface: 255 255 255;
+  --c-raised: 248 250 252;
+  --c-track: 241 245 249;
+
+  --c-ink: 30 41 59;
+  --c-sub: 71 85 105;
+  --c-muted: 100 116 139;
+  --c-faint: 148 163 184;
+  --c-dim: 203 213 225;
+
+  --c-line: 226 232 240;
+  --c-line-soft: 241 245 249;
+
+  --c-up: 220 38 38;
+  --c-up-bg: 254 242 242;
+  --c-up-line: 254 202 202;
+  --c-down: 22 163 74;
+  --c-down-bg: 240 253 244;
+  --c-down-line: 187 247 208;
+
+  --c-warn: 180 83 9;
+  --c-warn-strong: 217 119 6;
+  --c-warn-bg: 255 251 235;
+  --c-warn-line: 253 230 138;
+  --c-danger: 220 38 38;
+  --c-danger-bg: 254 242 242;
+  --c-danger-line: 254 202 202;
+  --c-ok: 4 120 87;
+
+  --c-accent-bg: 239 246 255;
+  --c-accent-ink: 29 78 216;
+  --c-accent-line: 191 219 254;
+
+  color-scheme: light;
+}
+
+/**
+ * 深色的中性色刻意偏藍，和品牌藍是同一個色系，
+ * 純灰在這個介面裡會顯得沒有經過挑選。
+ * 漲跌色也要調亮：red-600 / green-600 在深底上對比不足。
+ *
+ * 這段刻意重複兩次而不是抽成 mixin —— PostCSS 沒有 @mixin，
+ * 用了會靜默失效（產出的 CSS 完全沒有深色規則，卻不報錯）。
+ */
+/* 系統為深色，且使用者沒有明確選亮色 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+  --c-sidebar: 6 10 18;
+  --c-canvas: 10 15 26;
+  --c-surface: 19 27 43;
+  --c-raised: 26 36 56;
+  --c-track: 33 45 68;
+
+  --c-ink: 226 232 240;
+  --c-sub: 176 189 209;
+  --c-muted: 140 155 178;
+  --c-faint: 110 124 148;
+  --c-dim: 82 95 117;
+
+  --c-line: 38 51 76;
+  --c-line-soft: 30 41 62;
+
+  --c-up: 248 113 113;
+  --c-up-bg: 56 22 26;
+  --c-up-line: 110 40 45;
+  --c-down: 74 222 128;
+  --c-down-bg: 15 46 29;
+  --c-down-line: 30 85 52;
+
+  --c-warn: 252 211 77;
+  --c-warn-strong: 251 191 36;
+  --c-warn-bg: 56 43 12;
+  --c-warn-line: 110 82 22;
+  --c-danger: 248 113 113;
+  --c-danger-bg: 56 22 26;
+  --c-danger-line: 110 40 45;
+  --c-ok: 52 211 153;
+
+  --c-accent-bg: 23 40 74;
+  --c-accent-ink: 147 197 253;
+  --c-accent-line: 44 71 122;
+
+  color-scheme: dark;
+  }
+}
+
+/* 使用者明確選深色，覆蓋系統設定 */
+:root[data-theme='dark'] {
+  --c-sidebar: 6 10 18;
+  --c-canvas: 10 15 26;
+  --c-surface: 19 27 43;
+  --c-raised: 26 36 56;
+  --c-track: 33 45 68;
+
+  --c-ink: 226 232 240;
+  --c-sub: 176 189 209;
+  --c-muted: 140 155 178;
+  --c-faint: 110 124 148;
+  --c-dim: 82 95 117;
+
+  --c-line: 38 51 76;
+  --c-line-soft: 30 41 62;
+
+  --c-up: 248 113 113;
+  --c-up-bg: 56 22 26;
+  --c-up-line: 110 40 45;
+  --c-down: 74 222 128;
+  --c-down-bg: 15 46 29;
+  --c-down-line: 30 85 52;
+
+  --c-warn: 252 211 77;
+  --c-warn-strong: 251 191 36;
+  --c-warn-bg: 56 43 12;
+  --c-warn-line: 110 82 22;
+  --c-danger: 248 113 113;
+  --c-danger-bg: 56 22 26;
+  --c-danger-line: 110 40 45;
+  --c-ok: 52 211 153;
+
+  --c-accent-bg: 23 40 74;
+  --c-accent-ink: 147 197 253;
+  --c-accent-line: 44 71 122;
+
+  color-scheme: dark;
+}
+
 @layer base {
   body {
-    /* 字型走系統既有的中文字型，不從 CDN 拉 webfont */
     font-family: theme('fontFamily.sans');
-    background-color: #f8fafc;
+    /* 明確指定底色：透明的 body 會借到宿主頁面的顏色 */
+    background-color: theme('colors.canvas');
+    color: theme('colors.ink');
   }
 }
 
@@ -33,4 +176,8 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-content.active { animation: none; }
 }
