@@ -220,15 +220,24 @@ export function recommend(stocks, profile = {}) {
   // 同分時代號小的在前，確保輸出穩定可測
   scored.sort((a, b) => b.score - a.score || a.code.localeCompare(b.code));
 
-  // 產業上限：避免整份推薦清單都是同一個產業
+  // 產業上限：避免整份推薦清單都是同一個產業。
+  //
+  // 迴歸測試：只對「已知產業」的標的設上限。若把不知道產業別的標的
+  // 全部歸進同一個「未分類」桶再套上限，會等於宣稱「這些互不相干的
+  // 公司都是同一個產業」——來源被擋、industry 全部是 null 時
+  // （見 src/sources/twse.js 的 profiles()），這個桶會裝下候選池
+  // 裡幾乎所有標的，上限機制會把整份推薦清單砍到只剩 perIndustryCap
+  // 檔（例如要 8 檔卻只給 3 檔），跟「避免集中在同一產業」的本意相反。
   const perIndustryCap = Math.max(2, Math.ceil(limit / 3));
   const picked = [];
   const industryCount = new Map();
 
   for (const item of scored) {
-    const key = item.industry || '未分類';
-    if ((industryCount.get(key) || 0) >= perIndustryCap) continue;
-    industryCount.set(key, (industryCount.get(key) || 0) + 1);
+    const key = item.industry;
+    if (key) {
+      if ((industryCount.get(key) || 0) >= perIndustryCap) continue;
+      industryCount.set(key, (industryCount.get(key) || 0) + 1);
+    }
     picked.push(item);
     if (picked.length >= limit) break;
   }

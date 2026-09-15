@@ -29,8 +29,12 @@ test('normalizeCode 只接受合法台股代號', () => {
   assert.equal(normalizeCode(' 2330 '), '2330');
   assert.equal(normalizeCode('00878'), '00878', '五碼 ETF 也要接受');
   assert.equal(normalizeCode('2330A'), '2330A', '特別股結尾帶英文');
+  assert.equal(normalizeCode('00400A'), '00400A',
+    '迴歸測試：主動式 ETF 用五碼數字+一碼字母，實測發現漏接會讓 11% 的' +
+    '上市證券（152/1379 檔，2026-09-15 資料）整批消失');
   assert.equal(normalizeCode('abc'), null);
   assert.equal(normalizeCode('123'), null);
+  assert.equal(normalizeCode('1234567'), null, '過長的數字不該被接受');
 });
 
 test('twDateToISO 處理民國與西元', () => {

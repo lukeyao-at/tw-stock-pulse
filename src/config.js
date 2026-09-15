@@ -32,22 +32,35 @@ export const TTL = {
 
 /**
  * 上市（TWSE）公開端點。
- * openapi.twse.com.tw 回傳 JSON 陣列且允許跨域，是最穩的一組。
+ *
+ * 實測發現：openapi.twse.com.tw（新版 API 網域）的 WAF 會擋掉雲端機房
+ * IP（見 2026-09-15 的診斷記錄），但舊版 www.twse.com.tw 網域＋
+ * response=open_data／response=json 參數不會被擋 —— 這是政府開放資料
+ * 平台登記的正式格式，不是繞防護的取巧做法。dailyAll/valuation 因此
+ * 改回傳 CSV（response=open_data），事件端點回傳 { fields, data }
+ * 的陣列格式（response=json），兩者都改在 src/sources/twse.js 解析，
+ * 不是 openapi 那種現成物件陣列。
+ *
+ * 公司基本資料（profile）與盤中即時報價（見 MIS 設定）目前找不到
+ * 未被擋的替代端點，維持原網址；抓不到時該欄位顯示「—」，
+ * 不影響其他功能（見 src/universe.js 的容錯設計）。
  */
 export const TWSE = {
-  /** 每日收盤行情（全部上市個股） */
-  dailyAll: 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-  /** 個股本益比、殖利率及股價淨值比 */
-  valuation: 'https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL',
-  /** 上市公司基本資料（含產業別） */
+  /** 每日收盤行情（全部上市個股）—— CSV 格式 */
+  dailyAll: 'https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data',
+  /** 個股本益比、殖利率及股價淨值比 —— CSV 格式 */
+  valuation: 'https://www.twse.com.tw/exchangeReport/BWIBBU_ALL?response=open_data',
+  /** 上市公司基本資料（含產業別）—— 目前無替代來源，多半會失敗 */
   profile: 'https://openapi.twse.com.tw/v1/opendata/t187ap03_L',
   /**
    * 事件類端點。這幾支的代號較容易改版，所以做成候選清單：
    * 逐一嘗試，成功的就用，失敗的略過（不會影響其他分頁）。
+   * 前兩支已驗證可用（response=json，{fields, data} 陣列格式）；
+   * 後兩支源自 MOPS，目前找不到未被擋的路徑，保留候選讓它自然失敗。
    */
   eventCandidates: [
-    { kind: '除權息', url: 'https://openapi.twse.com.tw/v1/exchangeReport/TWT49U' },
-    { kind: '除權息預告', url: 'https://openapi.twse.com.tw/v1/exchangeReport/TWT48U' },
+    { kind: '除權息', url: 'https://www.twse.com.tw/rwd/zh/exRight/TWT49U?response=json' },
+    { kind: '除權息預告', url: 'https://www.twse.com.tw/rwd/zh/exRight/TWT48U?response=json' },
     { kind: '法說會', url: 'https://openapi.twse.com.tw/v1/opendata/t187ap38_L' },
     { kind: '月營收', url: 'https://openapi.twse.com.tw/v1/opendata/t187ap05_L' },
   ],
@@ -86,9 +99,10 @@ export const MIS = {
  */
 export const NEWS_FEEDS = [
   { name: 'Yahoo 股市', url: 'https://tw.stock.yahoo.com/rss?category=news' },
-  { name: '鉅亨網 台股', url: 'https://news.cnyes.com/rss/news/cat/tw_stock_news' },
   { name: '經濟日報 證券', url: 'https://money.udn.com/rssfeed/news/1001/5591?ch=money' },
-  { name: '工商時報', url: 'https://ctee.com.tw/feed' },
+  { name: 'ETtoday 財經', url: 'https://feeds.feedburner.com/ettoday/finance' },
+  // 鉅亨網（404）與工商時報（403）的舊網址已失效，實測日期見 README「已知限制」；
+  // 留言在此，若之後找到新網址直接換掉即可，抓取邏輯不用動。
 ];
 
 /** 個股新聞樣板；{code} 會被代號取代（Yahoo 用 2330.TW 這種格式） */

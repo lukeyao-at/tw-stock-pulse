@@ -46,11 +46,19 @@ export function num(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** 台股代號：四位數（少數 ETF/特別股為 4 位加英文，一律保留原樣） */
+/**
+ * 台股代號：4 碼數字（一般股票，如 2330）或 5 碼數字（ETF/ETN，如
+ * 00878），後面可能再接 1 碼英文字母（特別股、主動式 ETF，如
+ * 00400A）。
+ *
+ * 迴歸測試：原本只接受「4 碼數字 + 選配 1 碼」，會把 5 碼數字的
+ * 主動式 ETF（00400A 這類）判定為無效代號整批漏掉 —— 實測 2026-09-15
+ * 的 STOCK_DAY_ALL 裡有 152 檔（占全部 1379 檔的 11%）因此消失。
+ */
 export function normalizeCode(value) {
   if (value === undefined || value === null) return null;
   const s = String(value).trim().toUpperCase();
-  return /^[0-9]{4}[0-9A-Z]?$/.test(s) ? s : null;
+  return /^[0-9]{4,5}[0-9A-Z]?$/.test(s) ? s : null;
 }
 
 /**
@@ -87,6 +95,61 @@ const decodeEntities = (s) =>
  * 所以剝標籤要做兩趟：先剝真標籤 → 解 entity → 再剝解出來的標籤。
  * 只做一趟會讓 <p> 這種東西原封不動留在摘要裡。
  */
+/**
+ * 解析 TWSE「response=open_data」格式的 CSV。
+ *
+ * 這批端點的欄位值一律用雙引號包住（"2330"、"台積電"），正確處理
+ * 引號內的逗號比直接 split(',') 保險 —— 目前的欄位（代號、名稱、
+ * 數字）雖然不會出現內含逗號的情況，但公司名稱之後可能改變，
+ * 用正規的 CSV 掃描不必等出事才修。
+ */
+export function parseCsv(text) {
+  if (!text) return [];
+  // 去掉可能的 UTF-8 BOM，否則表頭第一個欄位名稱會比對不到
+  const clean = text.replace(/^\uFEFF/, '');
+  const lines = clean.split(/\r?\n/).filter((l) => l.trim().length);
+  if (!lines.length) return [];
+
+  const parseLine = (line) => {
+    const cells = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i += 1; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        cells.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    cells.push(cur.trim());
+    return cells;
+  };
+
+  const headers = parseLine(lines[0]);
+  return lines.slice(1).map((line) => {
+    const cells = parseLine(line);
+    const row = {};
+    headers.forEach((h, i) => { row[h] = cells[i] ?? ''; });
+    return row;
+  });
+}
+
+/**
+ * 把 TWSE 舊格式的 { stat, fields:[...], data:[[...], ...] } 攤平成
+ * 物件陣列，讓 pick() 可以用欄位名稱取值，而不必記每個位置的索引。
+ * 不是這個形狀就回 null，呼叫端再自行 fallback 到其他解法。
+ */
+export function zipFieldsData(payload) {
+  if (!Array.isArray(payload?.fields) || !Array.isArray(payload?.data)) return null;
+  const { fields } = payload;
+  return payload.data.map((row) => Object.fromEntries(fields.map((f, i) => [f, row[i]])));
+}
+
 export function stripHtml(html) {
   if (!html) return '';
   const once = String(html)

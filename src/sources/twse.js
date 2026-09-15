@@ -6,15 +6,18 @@
  */
 
 import { TWSE, TTL } from '../config.js';
-import { fetchJson } from '../http.js';
+import { fetchJson, fetchText } from '../http.js';
 import * as cache from '../cache.js';
-import { pick, num, normalizeCode, twDateToISO } from '../parse.js';
+import { pick, num, normalizeCode, twDateToISO, parseCsv, zipFieldsData } from '../parse.js';
 
 const CODE_KEYS = ['Code', 'SecuritiesCompanyCode', '公司代號', '股票代號', '證券代號'];
 const NAME_KEYS = ['Name', 'CompanyName', '公司名稱', '公司簡稱', '股票名稱', '證券名稱'];
 
 const asArray = (payload) => {
   if (Array.isArray(payload)) return payload;
+  // TWSE 舊格式：{ stat, fields:[...], data:[[...], ...] }（位置對應，非物件）
+  const zipped = zipFieldsData(payload);
+  if (zipped) return zipped;
   // 少數端點會包一層 { data: [...] } 或 { result: { data: [...] } }
   for (const path of [payload?.data, payload?.result?.data, payload?.aaData]) {
     if (Array.isArray(path)) return path;
@@ -25,7 +28,8 @@ const asArray = (payload) => {
 /** 每日收盤行情（全部上市個股） */
 export async function dailyQuotes() {
   return cache.through('twse:daily', TTL.daily, async () => {
-    const rows = asArray(await fetchJson(TWSE.dailyAll));
+    // response=open_data 回傳 CSV，不是 openapi 那種現成 JSON 陣列
+    const rows = parseCsv(await fetchText(TWSE.dailyAll));
     const out = [];
     for (const row of rows) {
       const code = normalizeCode(pick(row, CODE_KEYS));
@@ -59,7 +63,8 @@ export async function dailyQuotes() {
 /** 個股本益比、殖利率、股價淨值比 */
 export async function valuations() {
   return cache.through('twse:valuation', TTL.valuation, async () => {
-    const rows = asArray(await fetchJson(TWSE.valuation));
+    // response=open_data 回傳 CSV，不是 openapi 那種現成 JSON 陣列
+    const rows = parseCsv(await fetchText(TWSE.valuation));
     const out = new Map();
     for (const row of rows) {
       const code = normalizeCode(pick(row, CODE_KEYS));

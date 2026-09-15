@@ -8,13 +8,13 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "offline": "TSP_OFFLINE=1 node server.js",
+    "start": "NODE_OPTIONS=--use-env-proxy node server.js",
+    "dev": "NODE_OPTIONS=--use-env-proxy node --watch server.js",
+    "offline": "NODE_OPTIONS=--use-env-proxy TSP_OFFLINE=1 node server.js",
     "build:css": "tailwindcss -i src/styles.css -o public/tailwind.css --minify",
     "watch:css": "tailwindcss -i src/styles.css -o public/tailwind.css --watch",
     "test": "node --test",
-    "check-sources": "node scripts/check-sources.js",
+    "check-sources": "NODE_OPTIONS=--use-env-proxy node scripts/check-sources.js",
     "build:demo": "node scripts/build-demo.js"
   },
   "keywords": [

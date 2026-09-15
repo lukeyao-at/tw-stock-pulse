@@ -105,17 +105,46 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
 
 ## 資料來源
 
-| 用途 | 來源 |
-|---|---|
-| 上市每日行情 | `openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
-| 上市本益比／殖利率／淨值比 | `openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL` |
-| 上市公司基本資料（產業別） | `openapi.twse.com.tw/v1/opendata/t187ap03_L` |
-| 上櫃行情 | `www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes` |
-| 盤中即時報價 | `mis.twse.com.tw/stock/api/getStockInfo.jsp` |
-| 歷史日成交（均量基準） | `www.twse.com.tw/exchangeReport/STOCK_DAY` |
-| 新聞 | 財經媒體 RSS（見 `src/config.js` 的 `NEWS_FEEDS`） |
+| 用途 | 來源 | 狀態（2026-09-15 實測） |
+|---|---|---|
+| 上市每日行情 | `www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data`（CSV） | ✅ 真實資料 |
+| 上市本益比／殖利率／淨值比 | `www.twse.com.tw/exchangeReport/BWIBBU_ALL?response=open_data`（CSV） | ✅ 真實資料 |
+| 上市除權息／除權息預告 | `www.twse.com.tw/rwd/zh/exRight/TWT49U`／`TWT48U`（JSON） | ✅ 真實資料 |
+| 上市公司基本資料（產業別） | `openapi.twse.com.tw/v1/opendata/t187ap03_L` | ❌ 被 WAF 擋，找不到替代 |
+| 上市法說會／月營收 | `openapi.twse.com.tw/v1/opendata/t187ap38_L`／`t187ap05_L` | ❌ 被 WAF 擋，找不到替代 |
+| 上櫃行情／估值／基本資料 | `www.tpex.org.tw/openapi/v1/...` | ✅ 真實資料 |
+| 盤中即時報價 | `mis.twse.com.tw/stock/api/getStockInfo.jsp` | ❌ 502，防護目前最嚴，找不到替代 |
+| 歷史日成交（均量基準） | `www.twse.com.tw/exchangeReport/STOCK_DAY` | ✅ 真實資料 |
+| 新聞 | Yahoo 股市、經濟日報、ETtoday（見 `NEWS_FEEDS`） | ✅ 真實資料 |
 
-**這些端點會改版。** 所以：
+### 重要發現：openapi 新網域 vs. www 舊網域
+
+TWSE 的 WAF 會擋掉雲端機房來源的連線，但**只擋新版 API 網域
+`openapi.twse.com.tw`，不擋舊版 `www.twse.com.tw` 網域**（搭配
+`response=open_data` 或 `response=json` 參數 —— 這是政府開放資料平台
+登記的正式格式，不是繞防護的取巧做法）。同一份資料（每日行情、本益比、
+除權息）兩個網域都有，只是回傳格式不同：
+
+- `openapi.twse.com.tw` → 現成的 JSON 物件陣列
+- `www.twse.com.tw/exchangeReport/...?response=open_data` → **CSV**（`src/parse.js` 的 `parseCsv`）
+- `www.twse.com.tw/rwd/zh/.../...?response=json` → `{ stat, fields:[...], data:[[...],...] }` **位置對應陣列**（`zipFieldsData` 攤平成物件再用 `pick()` 取值）
+
+如果哪天連舊網域也開始被擋，或哪天新網域解封了，只要在 `src/config.js` 換
+網址即可，`src/sources/twse.js` 的解析邏輯已經同時支援三種格式。
+
+### 重要發現：Node.js 的 `fetch` 不會自動讀取 `HTTPS_PROXY`
+
+如果你的網路環境需要透過 proxy 才能連外（常見於公司網路），要注意
+**Node.js 內建的 `fetch`（底層是 undici）預設不會讀取 `HTTPS_PROXY`／
+`https_proxy` 環境變數**，跟 curl、瀏覽器的行為不一樣——會直接嘗試連線
+而不經過 proxy，在需要 proxy 的網路下会直接失敗。
+
+本專案已經在 `package.json` 的所有執行腳本加上
+`NODE_OPTIONS=--use-env-proxy`（Node 內建但仍屬實驗性的旗標）解決這個
+問題。沒有設定 proxy 環境變數時這個旗標完全零副作用，已實測確認；如果
+你直接用 `node server.js` 而不是 `npm start`，記得自己加上這個旗標。
+
+**這些端點會改版、會限流。** 所以：
 
 - 欄位一律用「候選名稱清單」挑選（`src/parse.js` 的 `pick`），同一份行情不管叫
   `Code`、`SecuritiesCompanyCode` 還是 `公司代號` 都吃得下
@@ -124,9 +153,12 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
   不會讓整頁掛掉
 - 抓取失敗時會退回上一次成功的快取（「資料稍舊」優於「整頁空白」）
 - 行情全掛才退回內建樣本資料，並在畫面上明確標示
+- 短時間內對同一端點打太多次會觸發暫時性限流（307，幾秒到幾十秒後自動恢復），
+  不是端點掛了；正常使用頻率（估值快取 1 小時）不會遇到
 
 要確認目前哪些來源還活著，跑 `npm run check-sources`：它會實際打每一個端點，
-印出筆數與**實際回傳的欄位名稱**，端點改版時這是最快的線索。
+自動判斷 JSON／CSV／位置陣列三種格式，印出筆數與**實際回傳的欄位名稱**，
+端點改版時這是最快的線索。
 
 ---
 
@@ -177,19 +209,39 @@ API：
 - **推薦與情緒都只用當日資料**，沒有技術指標、沒有歷史回測、沒有基本面趨勢。
 - **公司名稱別名清單是手工維護的**（`src/match.js` 的 `ALIASES`），只涵蓋常見權值股。
   冷門股若新聞只用簡稱可能比對不到。
-- **盤中報價在非交易時段會是空的**，此時全部退回收盤價，畫面上標為「收盤」。
+- **盤中即時報價目前抓不到**（MIS 端點的防護最嚴，實測持續回 502），
+  所以畫面上永遠顯示收盤價、標為「收盤」而非「盤中」，不會即時跳動。
+  非交易時段這本來就是正常行為，但目前連盤中也一樣，等於失去了「盤中」
+  這個標籤原本要傳達的即時性。
+- **產業別資料目前抓不到**（`t187ap03_L` 被 WAF 擋，找不到替代端點），
+  推薦引擎對上市股票因此無法判斷分散度（該因子固定給滿分，等於不參與
+  排序），上櫃股票不受影響（來源正常）。這個缺口曾經引出一個真正的
+  bug：產業上限機制原本會把「不知道產業別」的標的全部當成同一個產業
+  套用數量上限，導致要求 8 檔卻只拿到 2、3 檔——已修正為只對「已知
+  產業」的標的套上限（見 `src/recommend.js`）。
 - 不含任何下單、券商 API 或帳務整合。
 
 ### 這個專案在什麼環境下被驗證過
 
-開發環境的對外連線被組織的網路政策阻擋（`openapi.twse.com.tw`、`mis.twse.com.tw`、
-`www.tpex.org.tw` 皆回 403），因此：
+開發環境的對外連線一開始被組織的網路政策整個阻擋，之後政策放寬，
+於 2026-09-15 完成了對真實端點的驗證：
 
-- **已實測**：全部 60 個單元測試、離線模式下的完整 App（用 headless Chromium
-  跑過六個分頁、驗證渲染、互動、搜尋、提醒觸發，零 console error）
-- **未實測**：真實端點的連通性與當前欄位名稱。抓取邏輯是照這些端點的公開契約
-  寫的，並對欄位改版做了容錯，但**第一次在本機跑時請先執行 `npm run check-sources`**
-  確認，若有失敗照它的提示調整 `src/config.js`。
+- **已實測（真實資料）**：上市每日行情、上市本益比／殖利率／淨值比、
+  上市除權息／除權息預告、上櫃行情／估值／基本資料、歷史日成交、
+  新聞 RSS —— 用真實今日行情跑過 `/api/dashboard`，確認自選股報價、
+  持股損益、市場漲跌統計都是用真實數字算出來的
+- **已確認持續失效**：上市公司基本資料（產業別）、盤中即時報價
+  （MIS）、法說會、月營收 —— 這幾支目前找不到未被擋的替代端點，
+  詳見上方「資料來源」表格；系統會自動降級（該欄位顯示「—」或退回
+  收盤價），不影響其他功能
+- **已實測**：全部 60 個單元測試、離線模式與線上模式下的完整 App
+  （headless Chromium 跑過六個分頁，零 console error）
+- 驗證過程中額外修正兩個真實 bug：`normalizeCode()` 漏接 5 碼數字的
+  主動式 ETF 代號（曾讓 11% 的上市證券消失）、Node `fetch` 不讀
+  `HTTPS_PROXY` 導致需要 proxy 的網路環境下抓取全部失敗
+
+跑起來後仍然建議先執行 `npm run check-sources`——你的網路環境、當下的
+限流狀態都可能跟這裡的實測結果不同。
 
 ---
 

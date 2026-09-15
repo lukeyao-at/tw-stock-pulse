@@ -71,6 +71,20 @@ test('缺漏的財務資料以中性計分而非零分', () => {
   assert.ok(item.reasons.some((x) => x.includes('無股利資料')), '應說明資料缺漏');
 });
 
+test('未知產業別的標的不受產業上限限制', () => {
+  // 迴歸測試：若把「不知道產業別」的標的全部歸進同一個「未分類」桶
+  // 再套上限，等於宣稱這些互不相干的公司是同一產業——上市公司基本
+  // 資料來源被擋、industry 全部是 null 時（真實發生過的情況），
+  // 會把整份推薦清單砍到只剩 perIndustryCap 檔，要 8 檔卻只給 3 檔。
+  const noIndustry = Array.from({ length: 10 }, (_, i) => ({
+    code: `900${i}`, name: `測試${i}`, market: '上市', industry: null,
+    close: 100 + i, changePercent: 0, turnover: 1e9,
+    peRatio: 15, dividendYield: 3, pbRatio: 1,
+  }));
+  const r = recommend(noIndustry, { limit: 8, minTurnover: 0 });
+  assert.equal(r.items.length, 8, '未知產業別不該被產業上限砍量');
+});
+
 test('推薦清單有產業上限，不會全是同一產業', () => {
   const r = recommend(stocks, { limit: 9 });
   const counts = new Map();

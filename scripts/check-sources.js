@@ -11,7 +11,7 @@
 
 import { TWSE, TPEX, MIS, NEWS_FEEDS, NEWS_SYMBOL_FEED, HTTP_TIMEOUT_MS } from '../src/config.js';
 import { fetchJson, fetchText } from '../src/http.js';
-import { parseFeed, pick, normalizeCode } from '../src/parse.js';
+import { parseFeed, pick, normalizeCode, parseCsv, zipFieldsData } from '../src/parse.js';
 
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -39,17 +39,47 @@ function fail(label, error) {
 /** 印出實際回傳的欄位名稱 —— 端點改版時最有用的線索 */
 const fieldsOf = (row) => Object.keys(row || {}).join(', ');
 
+/**
+ * TWSE/TPEx 的公開端點沒有統一格式：openapi 系列回傳現成物件陣列，
+ * 舊版 www.twse.com.tw 系列有的回 CSV（response=open_data），有的回
+ * { stat, fields:[...], data:[[...],...] } 位置對應陣列（response=json）。
+ * 這裡依序嘗試三種解讀方式，而不是預設只認 JSON 陣列 —— 否則像
+ * STOCK_DAY_ALL 這種其實正常運作、只是格式是 CSV 的端點會被誤判成失敗。
+ */
+function parseRows(text) {
+  const trimmed = text.trim();
+
+  if (trimmed.startsWith('<')) return { error: 'html-block' };
+
+  try {
+    const payload = JSON.parse(trimmed);
+    if (Array.isArray(payload)) return { rows: payload };
+    const zipped = zipFieldsData(payload);
+    if (zipped) return { rows: zipped };
+    if (Array.isArray(payload?.data)) return { rows: payload.data };
+    return { error: `JSON 但抓不到陣列（頂層鍵：${fieldsOf(payload)}）` };
+  } catch {
+    // 不是 JSON，試試 CSV（response=open_data 系列）
+  }
+
+  const csvRows = parseCsv(trimmed);
+  if (csvRows.length) return { rows: csvRows, format: 'CSV' };
+
+  return { error: `無法辨識的格式（前 80 字：${shorten(trimmed.replace(/\s+/g, ' '), 80)}）` };
+}
+
 async function checkJsonArray(label, url, { codeKeys } = {}) {
   try {
-    const payload = await fetchJson(url);
-    const rows = Array.isArray(payload) ? payload : payload?.data;
+    const text = await fetchText(url);
+    const { rows, error, format } = parseRows(text);
 
-    if (!Array.isArray(rows)) {
-      return fail(label, `回應不是陣列（頂層鍵：${fieldsOf(payload)}）`);
+    if (error === 'html-block') {
+      return fail(label, '被安全性頁面擋下（WAF 判定為非瀏覽器請求，即使 HTTP 狀態是 200）');
     }
+    if (error) return fail(label, error);
     if (!rows.length) return fail(label, '回應是空陣列');
 
-    let note = `${rows.length} 筆 · 欄位：${shorten(fieldsOf(rows[0]), 120)}`;
+    let note = `${rows.length} 筆${format ? ` · 格式：${format}` : ''} · 欄位：${shorten(fieldsOf(rows[0]), 120)}`;
 
     if (codeKeys) {
       const sample = normalizeCode(pick(rows[0], codeKeys));
@@ -103,7 +133,7 @@ async function checkFeed(label, url) {
 
 // ── 主流程 ──────────────────────────────────────────
 
-const TWSE_CODE_KEYS = ['Code', '公司代號', '證券代號'];
+const TWSE_CODE_KEYS = ['Code', '公司代號', '證券代號', '股票代號'];
 const TPEX_CODE_KEYS = ['SecuritiesCompanyCode', 'Code', '公司代號'];
 
 console.log(`\n檢查台股資料來源（逾時 ${HTTP_TIMEOUT_MS}ms）\n`);
@@ -144,11 +174,23 @@ console.log(`結果：${GREEN}${ok} 個可用${RESET} / ${failed ? RED : ''}${fa
 if (failed) {
   console.log(`
 ${YELLOW}怎麼處理失敗的來源：${RESET}
-  · 行情類（STOCK_DAY_ALL / tpex_mainboard_quotes）失敗 → App 會退回內建樣本資料，
-    請優先修好；到 https://openapi.twse.com.tw/ 查目前的端點代號。
+  · 顯示「被安全性頁面擋下」→ 這是 TWSE/MOPS 的 WAF，不是網路不通
+    （HTTP 狀態常常還是 200，內容卻是「因為安全性考量」的攔截頁）。
+    實測發現 openapi.twse.com.tw（新版網域）比 www.twse.com.tw（舊版，
+    搭配 response=open_data 或 response=json）更容易被擋。如果某支
+    候選端點長期擋著，去 www.twse.com.tw 找同資料的舊版網址替換，
+    不必等 openapi 解封。
+  · 行情類（STOCK_DAY_ALL / tpex_mainboard_quotes）失敗 → App 會退回
+    內建樣本資料，請優先修好。
   · 估值、基本資料、事件類失敗 → 該欄位顯示「—」，其他功能不受影響。
-  · MIS 盤中報價在非交易時段本來就可能是空的，收盤後測到失敗不一定是壞了。
+  · MIS 盤中即時報價這支的防護目前最嚴，實測連舊版網域也一樣被擋
+    （502），抓不到時會自動退回收盤價，畫面上會標「收盤」而非「盤中」。
   · 新聞 RSS 失敗 → 直接在 src/config.js 的 NEWS_FEEDS 換掉網址即可。
+  · 如果 Node 執行時所有來源都回一個「Host not in allowlist」或
+    類似訊息，但用 curl 測同一個網址是通的 → 你的網路需要 proxy
+    （HTTPS_PROXY 環境變數已設定），但 Node 內建 fetch 預設不會讀取
+    它。package.json 的腳本已經加上 NODE_OPTIONS=--use-env-proxy
+    解決這個問題；若你直接用 node 指令而非 npm run，記得加這個旗標。
 `);
 }
 
