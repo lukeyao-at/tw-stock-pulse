@@ -107,3 +107,19 @@ export const NEWS_FEEDS = [
 
 /** 個股新聞樣板；{code} 會被代號取代（Yahoo 用 2330.TW 這種格式） */
 export const NEWS_SYMBOL_FEED = 'https://tw.stock.yahoo.com/rss?s={code}.TW';
+
+/**
+ * Gemini Deep Research（AI 市場報告，選用功能）。
+ *
+ * 不設 GEMINI_API_KEY 時這個功能整個不啟用（前端按鈕會停用並說明原因），
+ * 不影響其他功能 —— 跟其他來源失敗時的降級邏輯一致。這是本專案
+ * 唯一需要 API key 的功能，金鑰只透過環境變數帶入，不寫進任何檔案。
+ *
+ * 費用由你自己的 Gemini 帳號計費，每次研究約 1~7 美元（依模型與
+ * 研究深度而定），且是非同步任務，可能要等數分鐘到最多一小時。
+ */
+export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+export const GEMINI_API_BASE = process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
+/** deep-research-preview-04-2026（快，適合網頁等待）或 deep-research-max-preview-04-2026（更完整但更慢更貴） */
+export const GEMINI_DEEP_RESEARCH_MODEL =
+  process.env.GEMINI_DEEP_RESEARCH_MODEL || 'deep-research-preview-04-2026';

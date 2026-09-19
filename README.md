@@ -14,7 +14,7 @@
 ```bash
 npm start                # http://localhost:8420
 npm run offline          # 用內建樣本資料跑，完全不連外
-npm test                 # 60 個單元測試
+npm test                 # 68 個單元測試
 npm run check-sources    # 逐一實測每個公開來源是否還活著
 ```
 
@@ -94,6 +94,31 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
 賣出證交稅 0.3%，算的是**真正落袋**的損益。同一檔重複買進會自動算加權平均成本。
 另外顯示產業集中度，單一產業超過 40% 會提示。
 
+### AI 市場報告（選用）
+用當天的大盤快照（漲跌家數、漲跌幅前十、成交金額前十）當起點，交給
+**Gemini Deep Research**（Google 2026/04 開放給開發者的自動研究 agent）
+做深度研究，產出一份繁體中文的「台股市場與產業總覽報告」，並附上引用來源。
+只做市場／產業層級的分析，**不對個股給買賣建議** —— 跟推薦引擎（`src/recommend.js`）
+的可解釋、確定性設計分開。
+
+這是本專案**唯一需要 API key 的功能**，而且刻意設計成選用：
+
+- 沒設定 `GEMINI_API_KEY` 時，這個功能整個不啟用，前端按鈕會顯示「未啟用」，
+  不影響其他頁面（跟其他資料來源失敗時的降級邏輯一致）
+- 金鑰只透過環境變數帶入（`export GEMINI_API_KEY=...`），不寫進任何檔案、
+  不進版控，伺服器也不落地保存產出的報告內容——研究結果存在 Google 那邊，
+  我們的伺服器只是轉發 interaction id 與狀態
+- **這會用到你自己付費 Gemini 帳號的額度**：官方文件說明每次研究約
+  1～7 美元（依模型與研究深度而定），前端按鈕點下去前會先跳出費用與
+  等待時間的確認訊息
+- Deep Research 是**非同步**任務，一次研究通常要數分鐘，最長可能到一小時。
+  伺服器把「建立任務」（`POST /api/ai-report`）與「查詢狀態」
+  （`GET /api/ai-report/:id`）拆成兩條路由，前端每 10 秒輪詢一次，跟
+  Google 官方文件建議的輪詢間隔一致
+- 預設用 `deep-research-preview-04-2026`（較快，適合網頁等待），可用
+  `GEMINI_DEEP_RESEARCH_MODEL=deep-research-max-preview-04-2026` 換成
+  較完整但更慢更貴的版本
+
 ### 提醒
 價格門檻、單日漲跌幅、成交量放大倍數、利多／利空新聞出現、除權息與法說會倒數。
 
@@ -165,7 +190,7 @@ TWSE 的 WAF 會擋掉雲端機房來源的連線，但**只擋新版 API 網域
 ## 架構
 
 ```
-server.js              HTTP 伺服器（node:http，四條路由，零依賴）
+server.js              HTTP 伺服器（node:http，六條路由，零依賴）
 src/
   config.js            所有外部端點與快取秒數集中在此
   http.js              逾時、重試、瀏覽器樣 UA
@@ -178,10 +203,11 @@ src/
   portfolio.js         持股損益與產業集中度
   alerts.js            提醒規則評估
   api.js               組合成單一 dashboard 回應
-  sources/             twse / tpex / quotes / news / history
+  aiReport.js          AI 市場報告：組提示詞、串 Gemini Deep Research（選用）
+  sources/             twse / tpex / quotes / news / history / gemini
 public/                單頁 UI（自帶 Tailwind CSS 與 SVG 圖示）
 data/                  離線樣本資料
-test/                  60 個單元測試
+test/                  68 個單元測試
 ```
 
 API：
@@ -191,6 +217,8 @@ API：
 | `POST /api/dashboard` | 主要端點。帶入個人化設定，一次回傳整個畫面的資料 |
 | `GET /api/search?q=` | 個股搜尋（代號或名稱） |
 | `GET /api/health` | 來源健康度與快取狀態 |
+| `POST /api/ai-report` | 啟動一份 AI 市場報告（選用，需設定 `GEMINI_API_KEY`，未設定回 503） |
+| `GET /api/ai-report/:id` | 查詢 AI 市場報告的狀態／結果，前端每 10 秒輪詢一次 |
 
 個人化資料由前端在請求裡帶上來，後端不保存 —— 所以部署是零狀態的，
 我們也不必去保管別人的持股明細。
@@ -219,6 +247,10 @@ API：
   bug：產業上限機制原本會把「不知道產業別」的標的全部當成同一個產業
   套用數量上限，導致要求 8 檔卻只拿到 2、3 檔——已修正為只對「已知
   產業」的標的套上限（見 `src/recommend.js`）。
+- **AI 市場報告不是本專案的既有引擎**，是呼叫外部的 Gemini Deep Research，
+  內容非確定性（同樣的快照兩次呼叫可能得到不同措辭甚至不同結論），也可能
+  包含 AI 產生內容常見的錯誤，跟推薦引擎、情緒判讀的「可解釋、確定性」
+  設計原則不同，請自行查證後再參考。沒設定 `GEMINI_API_KEY` 就完全不啟用。
 - 不含任何下單、券商 API 或帳務整合。
 
 ### 這個專案在什麼環境下被驗證過
@@ -234,7 +266,7 @@ API：
   （MIS）、法說會、月營收 —— 這幾支目前找不到未被擋的替代端點，
   詳見上方「資料來源」表格；系統會自動降級（該欄位顯示「—」或退回
   收盤價），不影響其他功能
-- **已實測**：全部 60 個單元測試、離線模式與線上模式下的完整 App
+- **已實測**：全部 68 個單元測試、離線模式與線上模式下的完整 App
   （headless Chromium 跑過六個分頁，零 console error）
 - 驗證過程中額外修正兩個真實 bug：`normalizeCode()` 漏接 5 碼數字的
   主動式 ETF 代號（曾讓 11% 的上市證券消失）、Node `fetch` 不讀

@@ -210,6 +210,26 @@
                 <p id="recommend-disclaimer" class="text-xs text-muted mt-6 leading-relaxed"></p>
             </section>
 
+            <!-- ═══ AI 市場報告 ═══ -->
+            <section id="tab-ai-report" class="tab-content">
+                <div class="bg-surface rounded-xl border border-line p-5">
+                    <div class="flex items-start justify-between gap-4 flex-wrap">
+                        <div>
+                            <h2 class="font-semibold mb-1">AI 市場與產業總覽報告</h2>
+                            <p class="text-sm text-sub leading-relaxed max-w-2xl">
+                                用今天的大盤快照當起點，交給你自己的 Gemini Deep Research 做深度研究，
+                                產出一份市場與產業總覽報告（不是個股買賣建議）。這會用到你自己付費帳號的額度，
+                                單次約 1～7 美元，且需要等待數分鐘到最多一小時。
+                            </p>
+                        </div>
+                        <button id="ai-report-start" class="shrink-0 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-50 disabled:pointer-events-none">
+                            <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-lightbulb"/></svg>產生 AI 市場報告
+                        </button>
+                    </div>
+                    <div id="ai-report-panel" class="mt-5"></div>
+                </div>
+            </section>
+
             <!-- ═══ 提醒 ═══ -->
             <section id="tab-alerts" class="tab-content">
                 <div class="bg-surface rounded-xl border border-line p-5 mb-6">

@@ -145,6 +145,7 @@ function buildDashboard(body) {
     recommendations,
     alerts,
     events: upcoming,
+    aiReportAvailable: false, // demo 是自包含展示版，不連外，AI 市場報告一律不啟用
     market: {
       total: STOCKS.length,
       gainers: STOCKS.filter((s) => (s.changePercent ?? 0) > 0).length,

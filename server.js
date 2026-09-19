@@ -1,7 +1,7 @@
 /**
  * HTTP 伺服器：靜態檔 + JSON API。
  *
- * 刻意不使用 Express —— 這支服務只有四條路由，Node 內建的 http
+ * 刻意不使用 Express —— 這支服務路由不多，Node 內建的 http
  * 就夠了，換來的是零執行期依賴（不必 npm install 就能跑）。
  */
 
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import * as api from './src/api.js';
+import * as aiReport from './src/aiReport.js';
 import { PORT, OFFLINE } from './src/config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +107,32 @@ const server = http.createServer(async (req, res) => {
       // GET 也支援（空白設定），方便用瀏覽器或 curl 直接看
       const body = req.method === 'POST' ? await readBody(req) : {};
       return sendJson(res, 200, await api.dashboard(body));
+    }
+
+    // AI 市場報告（選用，需設定 GEMINI_API_KEY）。Deep Research 是非同步的，
+    // 所以拆成「建立任務」與「查狀態」兩條路由，由前端輪詢後者。
+    if (url.pathname === '/api/ai-report') {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: '僅支援 POST' });
+      if (!aiReport.isConfigured()) {
+        return sendJson(res, 503, { error: '尚未設定 GEMINI_API_KEY，AI 市場報告功能未啟用' });
+      }
+      try {
+        return sendJson(res, 200, await aiReport.startMarketReport());
+      } catch (err) {
+        return sendJson(res, 502, { error: err.message });
+      }
+    }
+
+    const aiReportMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)$/);
+    if (aiReportMatch) {
+      if (!aiReport.isConfigured()) {
+        return sendJson(res, 503, { error: '尚未設定 GEMINI_API_KEY，AI 市場報告功能未啟用' });
+      }
+      try {
+        return sendJson(res, 200, await aiReport.getMarketReport(decodeURIComponent(aiReportMatch[1])));
+      } catch (err) {
+        return sendJson(res, 502, { error: err.message });
+      }
     }
 
     if (url.pathname.startsWith('/api/')) {

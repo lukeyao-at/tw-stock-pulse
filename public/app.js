@@ -62,6 +62,7 @@ const TABS = [
   ['holdings', '持股損益', 'wallet'],
   ['news', '個人化新聞', 'newspaper'],
   ['recommend', '推薦標的', 'lightbulb'],
+  ['ai-report', 'AI 市場報告', 'chart-pie'],
   ['alerts', '提醒', 'bell'],
   ['settings', '設定', 'gear'],
 ];
@@ -88,6 +89,11 @@ let profile = loadProfile();
 let latest = null;
 let refreshTimer = null;
 let inFlight = false;
+
+/** AI 市場報告的狀態機：idle → in_progress → completed / failed */
+let aiReportState = { status: 'idle' };
+let aiReportPollTimer = null;
+const AI_REPORT_POLL_MS = 10000; // 跟 Gemini 官方文件建議的輪詢間隔一致
 
 function saveProfile() {
   try {
@@ -245,6 +251,7 @@ function renderAll() {
   renderHoldings();
   renderNews();
   renderRecommend();
+  renderAiReport();
   renderAlerts();
   renderDiagnostics();
 }
@@ -592,6 +599,96 @@ function renderRecommend() {
     　候選池 ${r.candidateCount} 檔（已排除已持有、已在自選、成交量過低者）。`;
 }
 
+// ── AI 市場報告（選用，需伺服器設定 GEMINI_API_KEY） ──────
+
+function renderAiReport() {
+  const button = $('ai-report-start');
+  const panel = $('ai-report-panel');
+  if (!button || !panel) return;
+
+  const available = latest?.aiReportAvailable ?? true; // 還沒拿到第一次 dashboard 回應前，先假設可用，避免閃爍
+  button.disabled = !available || aiReportState.status === 'in_progress';
+
+  if (!available) {
+    panel.innerHTML = emptyState('伺服器尚未設定 GEMINI_API_KEY，這個功能目前未啟用', 'gear');
+    return;
+  }
+
+  if (aiReportState.status === 'idle') {
+    panel.innerHTML = emptyState('按上面的按鈕開始產生今天的市場報告', 'lightbulb');
+    return;
+  }
+
+  if (aiReportState.status === 'in_progress') {
+    const elapsed = Math.round((Date.now() - aiReportState.startedAt) / 1000);
+    panel.innerHTML = `
+      <div class="flex items-center gap-2.5 text-sm text-sub">
+        <svg class="w-4 h-4 animate-spin shrink-0" aria-hidden="true"><use href="#i-rotate"/></svg>
+        研究中，已等待 ${elapsed} 秒（Deep Research 通常要數分鐘，最多可能到一小時，可以先切去別的分頁）
+      </div>`;
+    return;
+  }
+
+  if (aiReportState.status === 'failed') {
+    panel.innerHTML = `<div class="rounded-lg border border-danger-line bg-danger-bg text-danger px-4 py-3 text-sm">
+      產生失敗：${esc(aiReportState.error || '未知錯誤')}
+    </div>`;
+    return;
+  }
+
+  // completed —— 原樣保留換行，內容一律 escape（外部 AI 產出，跟新聞來源同等看待）
+  panel.innerHTML = `<div class="text-sm leading-relaxed whitespace-pre-wrap">${esc(aiReportState.text || '（沒有內容）')}</div>`;
+}
+
+function stopAiReportPoll() {
+  clearTimeout(aiReportPollTimer);
+  aiReportPollTimer = null;
+}
+
+async function pollAiReport() {
+  try {
+    const res = await fetch(`/api/ai-report/${encodeURIComponent(aiReportState.id)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `伺服器回應 ${res.status}`);
+
+    if (data.status === 'completed') {
+      aiReportState = { status: 'completed', id: aiReportState.id, text: data.text };
+    } else if (data.status === 'failed') {
+      aiReportState = { status: 'failed', id: aiReportState.id, error: '研究任務失敗' };
+    } else {
+      renderAiReport(); // 先更新等待秒數，再排下一次輪詢
+      aiReportPollTimer = setTimeout(pollAiReport, AI_REPORT_POLL_MS);
+      return;
+    }
+  } catch (err) {
+    aiReportState = { status: 'failed', id: aiReportState.id, error: err.message };
+  }
+  renderAiReport();
+}
+
+async function startAiReport() {
+  if (aiReportState.status === 'in_progress') return;
+  if (!confirm('這會呼叫你自己付費的 Gemini Deep Research，單次費用約 1～7 美元，且可能要等數分鐘到一小時才會完成，確定要繼續嗎？')) {
+    return;
+  }
+
+  stopAiReportPoll();
+  aiReportState = { status: 'in_progress', startedAt: Date.now() };
+  renderAiReport();
+
+  try {
+    const res = await fetch('/api/ai-report', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `伺服器回應 ${res.status}`);
+
+    aiReportState = { status: 'in_progress', id: data.id, startedAt: aiReportState.startedAt };
+    aiReportPollTimer = setTimeout(pollAiReport, AI_REPORT_POLL_MS);
+  } catch (err) {
+    aiReportState = { status: 'failed', error: err.message };
+  }
+  renderAiReport();
+}
+
 function renderAlerts() {
   const watch = latest.watchlist;
   const holdingCodes = latest.portfolio.positions.map((p) => ({ code: p.code, name: p.name }));
@@ -772,6 +869,8 @@ function initEvents() {
 
   $('refresh').addEventListener('click', refresh);
 
+  $('ai-report-start').addEventListener('click', startAiReport);
+
   $('theme-toggle').addEventListener('click', () => {
     const at = THEMES.findIndex(([key]) => key === profile.theme);
     profile.theme = THEMES[(at + 1) % THEMES.length][0];
@@ -926,5 +1025,6 @@ applyTheme(profile.theme);
 initEvents();
 applyTheme(profile.theme);   // 按鈕是 initEvents 之後才存在，圖示要再同步一次
 switchTab(location.hash.replace('#', '') || 'overview');
+renderAiReport();            // 第一次 dashboard 回應回來前，先顯示初始狀態
 refresh();
 scheduleRefresh();

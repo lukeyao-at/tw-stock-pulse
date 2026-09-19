@@ -22,6 +22,7 @@ import { analyze, summarize } from './sentiment.js';
 import { symbolsFor } from './match.js';
 import { recommend } from './recommend.js';
 import { OFFLINE } from './config.js';
+import { isConfigured as aiReportConfigured } from './aiReport.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const sampleNews = () =>
@@ -205,6 +206,7 @@ export async function dashboard(body = {}) {
     recommendations,
     alerts: fired,
     events: upcoming,
+    aiReportAvailable: aiReportConfigured(),
     market: {
       total: uni.stocks.length,
       gainers: uni.stocks.filter((s) => (s.changePercent ?? 0) > 0).length,
@@ -240,6 +242,7 @@ export async function health() {
     degraded: uni.degraded,
     notes: uni.notes,
     cache: cache.stats(),
+    aiReportAvailable: aiReportConfigured(),
     now: new Date().toISOString(),
   };
 }
