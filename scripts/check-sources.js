@@ -9,9 +9,10 @@
  *   npm run check-sources
  */
 
-import { TWSE, TPEX, MIS, NEWS_FEEDS, NEWS_SYMBOL_FEED, HTTP_TIMEOUT_MS } from '../src/config.js';
+import { TWSE, TPEX, MIS, NEWS_FEEDS, NEWS_SYMBOL_FEED, HISTORY, HTTP_TIMEOUT_MS } from '../src/config.js';
 import { fetchJson, fetchText } from '../src/http.js';
 import { parseFeed, pick, normalizeCode, parseCsv, zipFieldsData } from '../src/parse.js';
+import { parseYahooChart, parseMonthRows } from '../src/sources/history.js';
 
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -161,6 +162,31 @@ await checkJsonArray(
   'STOCK_DAY 2330',
   `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${new Date().toISOString().slice(0, 10).replace(/-/g, '')}&stockNo=2330`,
 );
+
+console.log('\n── 技術分析日 K');
+for (const symbol of ['2330.TW', '6488.TWO']) {
+  const label = `Yahoo chart ${symbol}`;
+  try {
+    const payload = await fetchJson(HISTORY.yahooChart.replace('{symbol}', symbol), {
+      headers: { 'User-Agent': HISTORY.yahooUserAgent },
+    });
+    const { bars } = parseYahooChart(payload);
+    if (bars.length < 250) fail(label, `只有 ${bars.length} 根 K 線，240 日通道會不夠用`);
+    else pass(label, `${bars.length} 根 · ${bars[0].date} ～ ${bars.at(-1).date} · 最新收盤 ${bars.at(-1).close}`);
+  } catch (err) {
+    fail(label, `${err.message}${String(err.message).includes('429') ? '（若是 429：確認 HISTORY.yahooUserAgent 沒被改成完整瀏覽器 UA）' : ''}`);
+  }
+}
+try {
+  const now = new Date();
+  const date = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/01`;
+  const payload = await fetchJson(HISTORY.tpexMonth.replace('{code}', '6488').replace('{date}', encodeURIComponent(date)));
+  const bars = parseMonthRows(payload?.tables?.[0]?.data, 1000);
+  if (bars.length) pass('櫃買月成交 6488（日 K 備援）', `${bars.length} 根 · 最新 ${bars.at(-1).date} 收 ${bars.at(-1).close}`);
+  else fail('櫃買月成交 6488（日 K 備援）', '解析不到任何 K 線');
+} catch (err) {
+  fail('櫃買月成交 6488（日 K 備援）', err.message);
+}
 
 console.log('\n── 新聞來源');
 for (const feed of NEWS_FEEDS) await checkFeed(feed.name, feed.url);

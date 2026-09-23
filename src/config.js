@@ -28,6 +28,7 @@ export const TTL = {
   profile: 12 * 3600,// 公司基本資料（產業別）
   events: 3600,      // 除權息、法說會等事件
   news: 5 * 60,      // 新聞
+  bars: 30 * 60,     // 技術分析日 K（盤後才會變，盤中半小時更新一次足夠）
 };
 
 /**
@@ -104,6 +105,28 @@ export const NEWS_FEEDS = [
   // 鉅亨網（404）與工商時報（403）的舊網址已失效，實測日期見 README「已知限制」；
   // 留言在此，若之後找到新網址直接換掉即可，抓取邏輯不用動。
 ];
+
+/**
+ * 技術分析用的日 K 歷史。
+ *
+ * Yahoo 的 chart 端點一個請求就給兩年的 OHLCV，是首選；證交所／櫃買的
+ * 個股日成交一次只給一個月，要連打十幾次，只當備援。2026-09-23 實測：
+ * Yahoo 與櫃買正常，證交所 STOCK_DAY 在雲端環境間歇性 connection reset。
+ *
+ * 注意 Yahoo 跟交易所相反：帶完整的 Chrome UA（上面的 USER_AGENT）會
+ * 固定回 429，只帶「Mozilla/5.0」才正常 —— 所以它用自己的 yahooUserAgent。
+ */
+export const HISTORY = {
+  /** {symbol} → 2330.TW（上市）／6488.TWO（上櫃） */
+  yahooChart: 'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d',
+  yahooUserAgent: 'Mozilla/5.0',
+  /** 上市個股月成交，date=YYYYMMDD（取該月） */
+  twseMonth: 'https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={date}&stockNo={code}',
+  /** 上櫃個股月成交，date=YYYY/MM/DD（取該月），成交量單位是「張」 */
+  tpexMonth: 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code={code}&date={date}&response=json',
+  /** 備援來源往回抓幾個月（120 日通道 + 指標暖機約需 9 個月） */
+  fallbackMonths: 12,
+};
 
 /** 個股新聞樣板；{code} 會被代號取代（Yahoo 用 2330.TW 這種格式） */
 export const NEWS_SYMBOL_FEED = 'https://tw.stock.yahoo.com/rss?s={code}.TW';

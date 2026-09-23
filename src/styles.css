@@ -51,6 +51,11 @@
   --c-accent-ink: 29 78 216;
   --c-accent-line: 191 219 254;
 
+  /* 技術分析圖的線條（通道 / MA20 / MA60），已用 dataviz 驗證器檢查過色盲區分度 */
+  --c-s1: 42 120 214;
+  --c-s2: 235 104 52;
+  --c-s3: 27 175 122;
+
   color-scheme: light;
 }
 
@@ -100,6 +105,10 @@
   --c-accent-ink: 147 197 253;
   --c-accent-line: 44 71 122;
 
+  --c-s1: 57 135 229;
+  --c-s2: 217 89 38;
+  --c-s3: 25 158 112;
+
   color-scheme: dark;
   }
 }
@@ -140,6 +149,10 @@
   --c-accent-bg: 23 40 74;
   --c-accent-ink: 147 197 253;
   --c-accent-line: 44 71 122;
+
+  --c-s1: 57 135 229;
+  --c-s2: 217 89 38;
+  --c-s3: 25 158 112;
 
   color-scheme: dark;
 }

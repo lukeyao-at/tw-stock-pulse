@@ -2,7 +2,7 @@
 /**
  * 產生 demo/index.html —— 單一自包含檔案，不需要伺服器就能開。
  *
- * 重點是「同一份程式碼」：計分引擎、情緒判讀、新聞比對、損益計算全部
+ * 重點是「同一份程式碼」：計分引擎、情緒判讀、新聞比對、損益計算、技術分析全部
  * 從 src/ 直接取用，前端 public/app.js 也是原封不動內嵌，只用一層
  * fetch 攔截把 /api/* 換成瀏覽器端的本地運算。所以 demo 看到的行為
  * 和真的跑 npm start 一致，只有資料是 data/ 底下的樣本。
@@ -53,6 +53,8 @@ const modules = [
   wrapModule('Recommend', read('src/recommend.js')),
   wrapModule('Portfolio', read('src/portfolio.js')),
   wrapModule('Alerts', read('src/alerts.js')),
+  wrapModule('Technical', read('src/technical.js')),
+  wrapModule('SampleBars', read('src/sample-bars.js')),
   extractSearch(),
 ].join('\n\n');
 
@@ -162,6 +164,24 @@ function buildDashboard(body) {
   };
 }
 
+/** 對應 src/api.js 的 technical()：展示版沒有真實日 K，用同一支模擬產生器 */
+function buildTechnical(params) {
+  const code = String(params.get('code') || '').trim().toUpperCase();
+  const stock = BY_CODE.get(code);
+  if (!stock) return { ok: false, code, name: code, reason: \`展示版只有樣本裡的 \${STOCKS.length} 檔，查無 \${code}\` };
+  const bars = SampleBars.sampleBars(code, { close: stock.close, volume: stock.volume });
+  return {
+    code, name: stock.name, market: stock.market, industry: stock.industry,
+    source: '模擬 K 線（展示版）', sample: true,
+    notes: ['展示版：K 線為依樣本收盤價產生的模擬走勢，非真實行情'],
+    ...Technical.report(bars, {
+      lookback: Number(params.get('lookback')) || 120,
+      capital: Number(params.get('capital')) || undefined,
+      riskPct: Number(params.get('riskPct')) || undefined,
+    }),
+  };
+}
+
 /**
  * 攔截 fetch，把 /api/* 導到本地運算。
  * 這樣 public/app.js 可以原封不動使用，畫面行為與真實版本完全一致。
@@ -174,6 +194,9 @@ const asJson = (data) => new Response(JSON.stringify(data), {
 window.fetch = async (url, opts) => {
   const href = String(url);
   if (href === '/api/dashboard') return asJson(buildDashboard(JSON.parse(opts?.body || '{}')));
+  if (href.startsWith('/api/technical')) {
+    return asJson(buildTechnical(new URLSearchParams(href.split('?')[1] || '')));
+  }
   if (href.startsWith('/api/search')) {
     const q = new URLSearchParams(href.split('?')[1] || '').get('q') || '';
     return asJson({ query: q, results: Universe.search(STOCKS, q), degraded: true });

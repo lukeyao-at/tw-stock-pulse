@@ -21,6 +21,8 @@ import * as cache from './cache.js';
 import { analyze, summarize } from './sentiment.js';
 import { symbolsFor } from './match.js';
 import { recommend } from './recommend.js';
+import { report as technicalReport } from './technical.js';
+import { sampleBars } from './sample-bars.js';
 import { OFFLINE } from './config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -221,6 +223,58 @@ export async function dashboard(body = {}) {
       notes,
       sourceErrors: [...new Set(sourceErrors)],
     },
+  };
+}
+
+/**
+ * 單一個股的技術分析（通道 + 指標 + 歷史驗證）。
+ *
+ * 跟 dashboard 分開：一檔要抓兩年日 K，只在使用者打開技術分析分頁、
+ * 選了某一檔時才算，不拖慢主畫面。
+ * @param {{code:string, lookback?:number, capital?:number, riskPct?:number}} query
+ */
+export async function technical(query = {}) {
+  const code = String(query.code || '').trim().toUpperCase();
+  if (!code) return { ok: false, reason: '請指定股票代號' };
+
+  const uni = await universe.load();
+  const stock = uni.byCode.get(code);
+  // 宇宙完整時查不到就是代號打錯，不必去連打十幾次交易所備援
+  // 離線時只能替樣本裡有的股票產生模擬 K 線，否則等於憑空捏造走勢
+  if (!stock && (!uni.degraded || OFFLINE)) return { ok: false, code, name: code, reason: `查無代號 ${code}` };
+
+  const opts = {
+    lookback: Number(query.lookback) || 120,
+    capital: Number(query.capital) > 0 ? Number(query.capital) : undefined,
+    riskPct: Number(query.riskPct) > 0 ? Math.min(Number(query.riskPct), 10) : undefined,
+  };
+
+  let daily;
+  if (OFFLINE) {
+    daily = {
+      bars: sampleBars(code, { close: stock?.close ?? 100, volume: stock?.volume ?? 5e6 }),
+      source: '模擬 K 線（離線模式）',
+      failures: ['離線模式：K 線為依樣本收盤價產生的模擬走勢，非真實行情'],
+      sample: true,
+    };
+  } else {
+    try {
+      daily = await history.dailyBars(code, stock?.market);
+    } catch (err) {
+      return { ok: false, code, name: stock?.name || code, reason: `抓不到 ${code} 的歷史 K 線：${err.message}` };
+    }
+  }
+
+  const result = technicalReport(daily.bars, opts);
+  return {
+    code,
+    name: stock?.name || daily.name || code,
+    market: stock?.market ?? null,
+    industry: stock?.industry ?? null,
+    source: daily.source,
+    sample: Boolean(daily.sample),
+    notes: daily.failures ?? [],
+    ...result,
   };
 }
 
