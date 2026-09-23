@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 *_raw_data.json
 industry_fundflow_raw.json
+*_analysis.html
