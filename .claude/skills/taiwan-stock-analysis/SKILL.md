@@ -10,7 +10,7 @@ description: |
   - 「經營/獲利/財務分析」、「幫我看這家公司」
   - 任何涉及台股財務數據視覺化的需求
 
-  需要環境變數 FINMIND_TOKEN（免費註冊：https://finmindtrade.com/ ）。沒有 token 時可退回 `fetch_twse.py`（僅上市一般業、單季快照，見步驟一備援方案）。
+  需要環境變數 FINMIND_TOKEN，本 repo 已在 `.claude/settings.json` 的 `env` 設定好，session 會自動帶入。沒有 token 時可退回 `fetch_twse.py`（僅上市一般業、單季快照，見步驟一備援方案）。
 ---
 
 # 台灣股票三維財務分析 Skill
@@ -31,11 +31,12 @@ description: |
 ### 主要方案：`scripts/fetch_finmind.py`（推薦，多季 + 現金流量表）
 
 ```bash
-FINMIND_TOKEN=xxx python scripts/fetch_finmind.py <股票代碼> [起始日期 YYYY-MM-DD]
-# 例：FINMIND_TOKEN=xxx python scripts/fetch_finmind.py 2317 2023-01-01
+python scripts/fetch_finmind.py <股票代碼> [起始日期 YYYY-MM-DD]
+# 例：python scripts/fetch_finmind.py 2317 2023-01-01
+# FINMIND_TOKEN 由 .claude/settings.json 的 env 自動帶入，不需要手動指定
 ```
 
-- Token 從環境變數讀取，**絕對不要把 token 寫進程式碼、SKILL.md 範例、commit 或任何輸出檔案**。使用者應把 token 放在自己的 `.env`（已被 `.gitignore` 排除）或 shell 環境變數。
+- Token 從環境變數 `FINMIND_TOKEN` 讀取。本 repo 為私人 repo，token 由擁有者決定放在 `.claude/settings.json` 的 `env`；換 token 時只改那裡。**不要把 token 寫進程式碼、SKILL.md 或任何輸出檔案**（HTML、JSON）。若 repo 將轉為公開或分享給他人，先到 FinMind 重新產生 token，並把它移出 `.claude/settings.json`。
 - 匿名（無 token）請求額度很低，且是依 IP 計算的共用額度，在雲端沙盒環境中很容易被其他人的請求用完，回傳 `{"status":402,"msg":"Requests reach the upper limit"}`。這種情況下請使用者確認 token 是否有正確帶入。
 - 涵蓋：上市（TWSE）**及**上櫃（TPEx）公司，資料集：
   - `TaiwanStockFinancialStatements`（綜合損益表）
@@ -168,7 +169,7 @@ verify-warnings（若 sanity warnings 不為空才渲染）
 
 ## 注意事項
 
-- **FINMIND_TOKEN 是敏感憑證**：不要印出完整 token、不要寫進 commit、不要放進生成的 HTML 或 JSON 輸出檔
+- **FINMIND_TOKEN 是敏感憑證**：唯一存放處是 `.claude/settings.json` 的 `env`；不要印出完整 token、不要另外寫進程式碼或其他 commit、不要放進生成的 HTML 或 JSON 輸出檔
 - 若欄位缺失（`None`），圖表以 `null` 處理，不要填入 0
 - 金額單位為 FinMind 原始單位（**元**，非億元/仟元），撰寫 insight 時請自行換算成「億元」等易讀單位並在文中註明
 - ROE/ROA/各項利潤率為**單季**數字，非年化；如需年度數字，用該年度四季加總的損益項目重新計算，不要直接對單季數字做簡單換算
