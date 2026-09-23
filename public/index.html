@@ -186,6 +186,54 @@
                 <div id="news-others" class="space-y-3"></div>
             </section>
 
+            <!-- ═══ 技術分析 ═══ -->
+            <section id="tab-technical" class="tab-content">
+                <div class="bg-surface rounded-xl border border-line p-5 mb-6">
+                    <div class="flex flex-wrap items-end gap-x-6 gap-y-4">
+                        <div class="min-w-0 flex-1">
+                            <label class="block text-xs text-muted mb-2">標的（自選股與持股）</label>
+                            <div id="ta-picker" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-muted mb-2" for="ta-code">其他代號</label>
+                            <div class="flex gap-1.5">
+                                <input id="ta-code" class="w-24 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="2603">
+                                <button id="ta-go" class="px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">分析</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-muted mb-2">通道長度</label>
+                            <div id="ta-lookback" class="flex gap-1.5"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ta-body"></div>
+
+                <details class="bg-surface rounded-xl border border-line mt-6">
+                    <summary class="px-5 py-3.5 font-semibold cursor-pointer">這套判讀怎麼運作、怎麼搭配你的通道操作</summary>
+                    <div class="px-5 pb-5 text-sm text-sub leading-relaxed space-y-3">
+                        <p><strong class="text-ink">通道怎麼畫：</strong>用收盤價做線性迴歸得到斜率（中軌），上緣取高點偏離的 95 百分位、下緣取低點偏離的 5 百分位——
+                        等於把手繪通道「碰到最多高點與低點的兩條平行線」變成可重現的規則，又不會被單一根長影線拉歪。
+                        通道只用<strong class="text-ink">今天以前</strong>的 K 線擬合，再延伸到今天判斷觸碰或突破，跟手繪一樣。</p>
+                        <p><strong class="text-ink">四種情境：</strong></p>
+                        <ul class="list-disc pl-5 space-y-1">
+                            <li>上升通道碰下緣 → 主要買點。最好同時看到量縮、RSI／KD 低檔、收紅 K 止跌</li>
+                            <li>上升通道碰上緣 → 不追高，持股可部分停利；帶量突破上緣才是強勢加速</li>
+                            <li>下降通道碰上緣 → 反彈遇壓的賣點；帶量突破上緣可能是趨勢反轉，等回測不破再進</li>
+                            <li>下降通道碰下緣 → 最容易虧錢的「接刀」位置，頂多小量搶反彈，目標看中軌</li>
+                        </ul>
+                        <p><strong class="text-ink">指標的角色是「確認」而不是「主訊號」：</strong>通道告訴你位置，指標告訴你力道。
+                        碰下緣時若 RSI 出現底背離、KD 低檔黃金交叉、MACD 柱狀體收斂，代表賣壓在減弱，比較像回測；
+                        若是帶量長黑直接貫穿下緣，就是跌破，應該停損而不是加碼。</p>
+                        <p><strong class="text-ink">停損放在下緣再往下 1 個 ATR：</strong>通道線是大家都看得到的位置，停損剛好設在線上很容易被洗出場。
+                        部位大小用「願意承擔的虧損 ÷ 每股停損距離」反推，而不是憑感覺決定買幾張。</p>
+                        <p><strong class="text-ink">歷史驗證：</strong>逐日用當時可取得的資料重畫通道、隔天開盤進場、碰停損或上緣出場（最多持有 40 天），
+                        扣除手續費與證交稅。它回答的是「這套規則過去在這檔股票上有沒有用」，不代表未來。</p>
+                    </div>
+                </details>
+            </section>
+
             <!-- ═══ 推薦 ═══ -->
             <section id="tab-recommend" class="tab-content">
                 <div class="bg-surface rounded-xl border border-line p-5 mb-6">
