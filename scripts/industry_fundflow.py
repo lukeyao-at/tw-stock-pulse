@@ -90,6 +90,7 @@ def fetch_twse_quotes():
         if not code:
             continue
         out[code] = {
+            "name": (row.get("證券名稱") or "").strip(),
             "close": to_num(row.get("收盤價")),
             "turnover": to_num(row.get("成交金額")),
         }
@@ -124,6 +125,7 @@ def fetch_tpex_quotes():
         if not code:
             continue
         out[code] = {
+            "name": (row.get("CompanyName") or "").strip(),
             "close": to_num(row.get("Close")),
             "turnover": to_num(row.get("TransactionAmount")),
         }
@@ -188,7 +190,7 @@ def main():
         close = q.get("close")
         if turnover is None or close is None:
             continue
-        records.append({"code": code, "close": close, "turnover": turnover})
+        records.append({"code": code, "name": q.get("name", ""), "close": close, "turnover": turnover})
 
     if not records:
         raise SystemExit(
@@ -221,7 +223,7 @@ def main():
         industry_total[industry] += net_value
         industry_stock_count[industry] += 1
         stock_detail.append({
-            "code": code, "industry": industry, "close": r["close"],
+            "code": code, "name": r["name"], "industry": industry, "close": r["close"],
             "turnover": r["turnover"], "net_shares": net_shares, "net_value": net_value,
         })
 
