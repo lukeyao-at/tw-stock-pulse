@@ -9,8 +9,27 @@
 
 const STORAGE_KEY = 'tw-stock-pulse/profile/v1';
 
+/**
+ * 預設自選股：依使用者券商 App 的分組排列（持股放最前面，技術分析分頁
+ * 預設就會先打開第一檔）。持股的股數與成本要在「持股損益」分頁自己輸入
+ * —— 這裡不放假數字，否則損益會算出看起來正常的錯誤結果。
+ */
+const DEFAULT_WATCHLIST = [
+  // 目前持股
+  '5880', '00919', '00931B',
+  // 製程・材料
+  '2338', '1711', '3532', '6488', '5347', '2303', '2330',
+  // 散熱・封裝測試・伺服器
+  '2382', '2449', '3017', '6805', '3324', '6275', '6669',
+  // 記憶體・PCB
+  '3323', '8358', '2383', '6274', '3037', '8046', '5289', '3260', '2344', '2408',
+];
+
+/** 舊版的預設清單。存檔若還是一字不差的舊預設，代表沒被改過，可以安全換成新預設 */
+const LEGACY_DEFAULT_WATCHLIST = ['2330', '2317', '2454', '2881', '2603'];
+
 const DEFAULT_PROFILE = {
-  watchlist: ['2330', '2317', '2454', '2881', '2603'],
+  watchlist: DEFAULT_WATCHLIST,
   holdings: [],
   rules: [],
   risk: 'balanced',
@@ -78,14 +97,22 @@ const FACTOR_LABELS = {
 
 // ── 狀態 ─────────────────────────────────────────────
 
+/** 每次都給新的陣列：直接展開 DEFAULT_PROFILE 會共用陣列，push 自選股時會改到預設值本身 */
+const freshDefaults = () => ({ ...DEFAULT_PROFILE, watchlist: [...DEFAULT_WATCHLIST], holdings: [], rules: [], goals: [...DEFAULT_PROFILE.goals] });
+
 function loadProfile() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PROFILE };
+    if (!raw) return freshDefaults();
     // 合併預設值，讓舊版存檔在新增欄位後仍可用
-    return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
+    const saved = { ...freshDefaults(), ...JSON.parse(raw) };
+    // 只換掉「從沒動過的舊預設」；使用者自己改過的清單一律保留
+    if (JSON.stringify(saved.watchlist) === JSON.stringify(LEGACY_DEFAULT_WATCHLIST)) {
+      saved.watchlist = [...DEFAULT_WATCHLIST];
+    }
+    return saved;
   } catch {
-    return { ...DEFAULT_PROFILE };
+    return freshDefaults();
   }
 }
 
@@ -1553,7 +1580,7 @@ function initEvents() {
     if (!file) return;
     try {
       const incoming = JSON.parse(await file.text());
-      profile = { ...DEFAULT_PROFILE, ...incoming };
+      profile = { ...freshDefaults(), ...incoming };
       saveProfile();
       location.reload();
     } catch (err) {
