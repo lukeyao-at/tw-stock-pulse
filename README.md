@@ -14,7 +14,7 @@
 ```bash
 npm start                # http://localhost:8420
 npm run offline          # 用內建樣本資料跑，完全不連外
-npm test                 # 83 個單元測試
+npm test                 # 84 個單元測試
 npm run check-sources    # 逐一實測每個公開來源是否還活著
 ```
 
@@ -207,7 +207,7 @@ src/
   sources/             twse / tpex / quotes / news / history
 public/                單頁 UI（自帶 Tailwind CSS 與 SVG 圖示）
 data/                  離線樣本資料
-test/                  83 個單元測試
+test/                  84 個單元測試
 ```
 
 API：
@@ -238,6 +238,8 @@ API：
 - **技術分析的回測是單一個股、單一規則的歷史驗證**，樣本通常只有個位數到十幾筆交易，
   沒有做參數最佳化（刻意不做，避免把雜訊調成「看起來很準」），也沒有模擬滑價。
   它能告訴你「這套規則在這檔股票上過去管不管用」，不能保證未來。
+- **通道用還原除權息後的價格計算**（Yahoo 的 adjclose），否則除息跳空會被誤判成
+  「回測下緣」。改走交易所備援時沒有還原資料，畫面上會提示。
 - **Yahoo 的 chart 端點是非官方公開端點**，隨時可能改版或限流；抓不到時會退回
   證交所／櫃買的月資料（一檔要打 12 次，慢很多）。注意 Yahoo 對完整的 Chrome UA
   會固定回 429，只能帶簡短的 `Mozilla/5.0`（見 `src/config.js` 的 `HISTORY`）。

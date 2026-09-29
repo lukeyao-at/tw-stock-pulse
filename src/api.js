@@ -265,6 +265,10 @@ export async function technical(query = {}) {
     }
   }
 
+  const notes = [...(daily.failures ?? [])];
+  if (daily.adjusted === false) {
+    notes.push('備援來源的價格未還原除權息：近期若有除息，跳空可能被誤判成觸碰通道下緣');
+  }
   const result = technicalReport(daily.bars, opts);
   return {
     code,
@@ -273,7 +277,7 @@ export async function technical(query = {}) {
     industry: stock?.industry ?? null,
     source: daily.source,
     sample: Boolean(daily.sample),
-    notes: daily.failures ?? [],
+    notes,
     ...result,
   };
 }

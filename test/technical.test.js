@@ -271,6 +271,26 @@ test('Yahoo 解析：只缺收盤的最新一根，用同一天的 meta.regularM
   assert.equal(parseYahooChart(payload).bars.length, 0);
 });
 
+test('Yahoo 解析：歷史價格依 adjclose 還原除息，最新一根維持真實價', () => {
+  const t0 = Date.UTC(2026, 8, 15, 1) / 1000;
+  const payload = {
+    chart: { result: [{
+      meta: {},
+      timestamp: [t0, t0 + 86400],
+      // 9/16 除息 1.1 元：除息前一天的還原價 = 32.74 − 1.1
+      indicators: {
+        quote: [{ open: [32.8, 31.9], high: [33, 32.1], low: [32.6, 31.8], close: [32.74, 31.99], volume: [1, 1] }],
+        adjclose: [{ adjclose: [31.64, 31.99] }],
+      },
+    }] },
+  };
+  const { bars, adjusted } = parseYahooChart(payload);
+  assert.equal(adjusted, true);
+  assert.equal(bars[0].close, 31.64);
+  assert.equal(bars[0].high, +(33 * 31.64 / 32.74).toFixed(2));
+  assert.equal(bars[1].close, 31.99, '最新一根不縮放');
+});
+
 test('交易所月資料解析：民國日期、千分位、櫃買成交量換算成股', () => {
   const rows = [
     ['115/09/01', '12,770', '12,430,205', '908.00', '998.00', '908.00', '994.00', '82.00', '31,831'],

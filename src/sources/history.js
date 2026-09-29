@@ -87,6 +87,11 @@ const taipeiDate = (seconds) => new Date((seconds + 8 * 3600) * 1000).toISOStrin
  * 但 meta.regularMarketPrice 就是同一天的收盤價 —— 日期對得上才拿來補，
  * 否則整個分析會落後一天。其餘任何欄位缺值的 K 線一律捨棄，不要用 0 補，
  * 0 會讓 RSI 與通道全部失真。
+ *
+ * 價格一律還原除權息（用 adjclose ÷ close 的比例縮放同一根的開高低收）。
+ * 不還原的話，除息那天的跳空會被當成「回測通道下緣」——實測 00919 在
+ * 9/16 除息 1.1 元後，未還原判讀是「買進訊號」，還原後其實在通道中段。
+ * 最新一根的 adjclose 等於 close，所以畫面上的現價仍是真實成交價。
  */
 export function parseYahooChart(payload) {
   const result = payload?.chart?.result?.[0];
@@ -95,6 +100,7 @@ export function parseYahooChart(payload) {
     throw new Error(payload?.chart?.error?.description || 'Yahoo 回應缺少 K 線資料');
   }
   const meta = result.meta ?? {};
+  const adjClose = result.indicators?.adjclose?.[0]?.adjclose;
   const metaDate = meta.regularMarketTime ? taipeiDate(meta.regularMarketTime) : null;
   const bars = [];
   result.timestamp.forEach((t, i) => {
@@ -110,10 +116,13 @@ export function parseYahooChart(payload) {
       bar.volume = bar.volume || meta.regularMarketVolume || 0;
     }
     if ([bar.open, bar.high, bar.low, bar.close].every((v) => typeof v === 'number' && v > 0)) {
-      bars.push({ ...bar, open: +bar.open.toFixed(2), high: +bar.high.toFixed(2), low: +bar.low.toFixed(2), close: +bar.close.toFixed(2) });
+      const adj = adjClose?.[i];
+      const factor = typeof adj === 'number' && adj > 0 && quote.close?.[i] ? adj / quote.close[i] : 1;
+      const f = (v) => +(v * factor).toFixed(2);
+      bars.push({ ...bar, open: f(bar.open), high: f(bar.high), low: f(bar.low), close: f(bar.close) });
     }
   });
-  return { bars, name: result.meta?.shortName || result.meta?.longName || null };
+  return { bars, name: result.meta?.shortName || result.meta?.longName || null, adjusted: Array.isArray(adjClose) };
 }
 
 /**
@@ -178,7 +187,7 @@ async function fromExchange(code, market) {
     }
   }
   if (!bars.length) throw new Error(`${otc ? '櫃買' : '證交所'}月成交資料全部抓取失敗`);
-  return { bars, name: null, source: otc ? '櫃買中心' : '證交所' };
+  return { bars, name: null, source: otc ? '櫃買中心' : '證交所', adjusted: false };
 }
 
 /**
