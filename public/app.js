@@ -10,7 +10,7 @@
 const STORAGE_KEY = 'tw-stock-pulse/profile/v1';
 
 /**
- * 預設自選股：依使用者券商 App 的分組排列（持股放最前面，技術分析分頁
+ * 預設自選股（與 data/watchlist.json 同步，那份給每日報告用）：依使用者券商 App 的分組排列（持股放最前面，技術分析分頁
  * 預設就會先打開第一檔）。持股的股數與成本要在「持股損益」分頁自己輸入
  * —— 這裡不放假數字，否則損益會算出看起來正常的錯誤結果。
  */
@@ -84,6 +84,7 @@ const TABS = [
   ['overview', '總覽', 'gauge'],
   ['holdings', '持股損益', 'wallet'],
   ['technical', '技術分析', 'chart-line'],
+  ['radar', '產業雷達', 'fire'],
   ['news', '個人化新聞', 'newspaper'],
   ['recommend', '推薦標的', 'lightbulb'],
   ['alerts', '提醒', 'bell'],
@@ -1295,6 +1296,255 @@ function bindChartHover(c) {
   });
 }
 
+// ── 產業雷達 ─────────────────────────────────────────
+//
+// 資料量大（全市場 20 個交易日 + 每檔自選股的營收與法人），所以跟技術分析
+// 一樣只在打開分頁時才抓，結果留在記憶體，按「重新整理」才重抓。
+
+let radarLatest = null;
+let radarLoading = false;
+
+const KIND_LABEL = { turnover: '資金', flow: '法人', theme: '題材', price: '股價' };
+const TREND_STYLE = {
+  heating: ['升溫', 'bg-up-bg text-up border-up-line'],
+  cooling: ['降溫', 'bg-down-bg text-down border-down-line'],
+  flat: ['持平', 'bg-raised text-sub border-line'],
+};
+const MOMENTUM_STYLE = {
+  accelerating: ['加速', 'bg-up-bg text-up border-up-line'],
+  decelerating: ['減速', 'bg-down-bg text-down border-down-line'],
+  steady: ['持平', 'bg-raised text-sub border-line'],
+};
+
+const chipHtml = ([label, cls]) => `<span class="inline-block px-2 py-0.5 rounded border text-xs ${cls}">${esc(label)}</span>`;
+const yi = (n) => (typeof n === 'number' ? `${n > 0 ? '+' : ''}${(n / 1e8).toFixed(1)} 億` : '—');
+const lots = (n) => (typeof n === 'number' ? `${n > 0 ? '+' : ''}${fmtInt(n / 1000)} 張` : '—');
+
+async function loadRadar({ force = false } = {}) {
+  if (radarLoading) return;
+  if (radarLatest && !force) return renderRadar();
+  radarLoading = true;
+  $('radar-body').innerHTML = `<div class="bg-surface rounded-xl border border-line py-16 text-center text-sm text-muted leading-relaxed">
+    正在整理全市場類股成交、法人買賣超、題材新聞與 ${profile.watchlist.length} 檔自選股的月營收…<br>
+    <span class="text-faint">第一次約需 1 分鐘（證交所要慢慢抓，避免被擋）；之後歷史資料都有快取，會快很多。</span></div>`;
+  try {
+    const res = await fetch('/api/radar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watchlist: profile.watchlist }),
+    });
+    if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
+    radarLatest = await res.json();
+    renderRadar();
+  } catch (err) {
+    $('radar-body').innerHTML = `<div class="rounded-lg border px-4 py-3 text-sm bg-danger-bg border-danger-line text-danger">產業雷達載入失敗：${esc(err.message)}</div>`;
+  } finally {
+    radarLoading = false;
+  }
+}
+
+/** 迷你走勢線：只表達形狀，數值看旁邊的欄位與 tooltip */
+function sparkline(values, { width = 96, height = 24, zero = false } = {}) {
+  const pts = values.map((v, i) => [i, v]).filter(([, v]) => typeof v === 'number');
+  if (pts.length < 2) return '<span class="text-faint text-xs">—</span>';
+  const ys = pts.map(([, v]) => v);
+  let min = Math.min(...ys);
+  let max = Math.max(...ys);
+  if (zero) { min = Math.min(min, 0); max = Math.max(max, 0); }
+  if (max === min) { max += 1; min -= 1; }
+  const x = (i) => 2 + (i / (values.length - 1)) * (width - 4);
+  const y = (v) => height - 2 - ((v - min) / (max - min)) * (height - 4);
+  const d = pts.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const [li, lv] = pts[pts.length - 1];
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true" class="inline-block align-middle">
+    ${zero ? `<line x1="0" x2="${width}" y1="${y(0)}" y2="${y(0)}" stroke="rgb(var(--c-line))" stroke-dasharray="2 2"/>` : ''}
+    <path d="${d}" fill="none" stroke="${series('s1')}" stroke-width="1.5"/>
+    <circle cx="${x(li)}" cy="${y(lv)}" r="2.5" fill="${series('s1')}"/></svg>`;
+}
+
+/** 以零為中心的橫條：正值往右（紅、流入），負值往左（綠、流出），台股慣例 */
+function divergingBar(value, maxAbs) {
+  if (typeof value !== 'number' || !maxAbs) return '';
+  const w = Math.min(50, (Math.abs(value) / maxAbs) * 50);
+  const pos = value >= 0 ? `left:50%;width:${w}%` : `left:${50 - w}%;width:${w}%`;
+  return `<div class="relative h-2 bg-track rounded-full overflow-hidden min-w-[80px]">
+    <div class="absolute inset-y-0 rounded-full ${value >= 0 ? 'bg-up' : 'bg-down'}" style="${pos}"></div>
+    <div class="absolute inset-y-0 left-1/2 w-px bg-faint"></div></div>`;
+}
+
+function renderRadar() {
+  const r = radarLatest;
+  if (!r) return;
+  if (!r.ok) {
+    $('radar-body').innerHTML = `<div class="bg-surface rounded-xl border border-line">${emptyState(r.reason || '無法載入', 'fire')}</div>`;
+    return;
+  }
+  $('radar-updated').textContent = `更新於 ${new Date(r.updatedAt).toLocaleString('zh-TW')}`;
+
+  $('radar-body').innerHTML = `
+    ${r.notes.length ? `<div class="rounded-lg border px-4 py-3 text-sm bg-warn-bg border-warn-line text-warn mb-6">
+      <div class="font-medium"><svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1.5" aria-hidden="true"><use href="#i-warning"/></svg>部分資料暫時抓不到，以下結果以已取得的資料計算</div>
+      <ul class="mt-1 text-xs list-disc list-inside space-y-0.5">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
+    ${signalsCard(r)}
+    <div class="grid lg:grid-cols-5 gap-6 mt-6">
+      ${rotationCard(r)}
+      ${flowsCard(r)}
+    </div>
+    ${themesCard(r)}
+    ${revenueCard(r)}
+    <p class="text-xs text-muted mt-6 leading-relaxed">
+      <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-info"/></svg>${esc(r.disclaimer)}
+    </p>`;
+}
+
+function signalsCard(r) {
+  const list = r.signals.slice(0, 8);
+  return `<div class="bg-surface rounded-xl border border-line">
+    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-semibold">早期訊號</h2>
+      <span class="text-xs text-muted">資金、法人、題材、股價四種訊號，同一產業出現愈多種愈值得注意</span>
+    </div>
+    ${list.length === 0 ? emptyState('目前沒有產業同時出現明顯的資金或題材訊號', 'fire') : `
+    <ul class="divide-y divide-line-soft">${list.map((s) => `
+      <li class="px-5 py-3.5 flex flex-col sm:flex-row gap-2 sm:gap-4">
+        <div class="sm:w-44 shrink-0">
+          <div class="font-medium">${esc(s.sector)}</div>
+          <div class="mt-1 flex items-center gap-1" aria-label="${s.score} 種訊號">
+            ${['turnover', 'flow', 'theme', 'price'].map((k) => `<span class="px-1.5 py-0.5 rounded text-[11px] border ${
+              s.kinds.includes(k) ? 'bg-accent-bg text-accent-ink border-accent-line' : 'text-dim border-line-soft'}">${KIND_LABEL[k]}</span>`).join('')}
+          </div>
+        </div>
+        <ul class="text-sm space-y-1 min-w-0">${s.reasons.map((x) => `<li class="text-ink">${esc(x)}</li>`).join('')}</ul>
+      </li>`).join('')}</ul>`}
+  </div>`;
+}
+
+function rotationCard(r) {
+  const rot = r.rotation;
+  if (!rot || !rot.sectors.length) {
+    return `<div class="min-w-0 lg:col-span-3 bg-surface rounded-xl border border-line">${emptyState('類股成交資料暫時抓不到', 'chart-pie')}</div>`;
+  }
+  const rows = rot.sectors.filter((s) => s.shareRecent >= 0.5).slice(0, 14);
+  const maxRel = Math.max(...rows.map((s) => Math.abs(s.relChange ?? 0)), 1);
+  return `<div class="min-w-0 lg:col-span-3 bg-surface rounded-xl border border-line">
+    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-semibold">資金輪動：類股成交比重</h2>
+      <span class="text-xs text-muted num">${esc(rot.from)} ～ ${esc(rot.to)} · ${rot.days} 個交易日 · 近 ${rot.recent} 日 vs 之前</span>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="bg-raised text-muted text-xs"><tr>
+        <th class="text-left font-medium px-5 py-2.5 whitespace-nowrap">類股</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">比重（之前 → 近期）</th>
+        <th class="font-medium px-3 py-2.5 whitespace-nowrap">相對變化</th>
+        <th class="font-medium px-3 py-2.5 whitespace-nowrap hidden sm:table-cell">每日比重</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">類股漲跌 5 日／20 日</th>
+      </tr></thead>
+      <tbody class="divide-y divide-line-soft">${rows.map((s) => {
+        const ret = r.returns[s.name] || {};
+        return `<tr>
+          <td class="px-5 py-2.5 whitespace-nowrap">${esc(s.name)}${s.streak >= 3 && (s.relChange ?? 0) > 0 ? ' <span class="text-[11px] text-up">連 ' + s.streak + ' 日放大</span>' : ''}</td>
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap">${fmt(s.shareEarly)}% → <strong>${fmt(s.shareRecent)}%</strong></td>
+          <td class="px-3 py-2.5"><div class="flex items-center gap-2">${divergingBar(s.relChange, maxRel)}
+            <span class="num text-xs w-14 text-right ${trendClass(s.relChange)}">${s.relChange === null ? '—' : signed(s.relChange, 1) + '%'}</span></div></td>
+          <td class="px-3 py-2.5 hidden sm:table-cell" title="${esc(s.series.map((v) => fmt(v)).join('%, '))}%">${sparkline(s.series)}</td>
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap"><span class="${trendClass(ret.r5)}">${ret.r5 == null ? '—' : signed(ret.r5) + '%'}</span>
+            <span class="text-faint">／</span><span class="${trendClass(ret.r20)}">${ret.r20 == null ? '—' : signed(ret.r20) + '%'}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function flowsCard(r) {
+  const f = r.flows.sectors.filter((x) => x.total !== 0);
+  if (!f.length) return `<div class="min-w-0 lg:col-span-2 bg-surface rounded-xl border border-line">${emptyState('法人資料暫時抓不到', 'wallet')}</div>`;
+  const top = [...f.slice(0, 6), ...f.slice(-6).filter((x) => !f.slice(0, 6).includes(x))];
+  const maxAbs = Math.max(...top.map((x) => Math.abs(x.total)));
+  return `<div class="min-w-0 lg:col-span-2 bg-surface rounded-xl border border-line">
+    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-semibold">法人流向（${esc(r.flows.market)}）</h2>
+      <span class="text-xs text-muted">近 ${r.flows.days} 日三大法人合計</span>
+    </div>
+    <ul class="p-5 space-y-2.5">${top.map((x) => `
+      <li class="text-sm" title="外資 ${yi(x.foreign)}、投信 ${yi(x.trust)}、自營商 ${yi(x.dealer)}">
+        <div class="flex justify-between gap-2"><span>${esc(x.name)}${x.bothBuyDays >= Math.ceil(x.days / 2) ? ' <span class="text-[11px] text-up">外資投信同買 ' + x.bothBuyDays + ' 天</span>' : ''}</span>
+          <span class="num ${trendClass(x.total)}">${yi(x.total)}</span></div>
+        <div class="mt-1">${divergingBar(x.total, maxAbs)}</div>
+      </li>`).join('')}</ul>
+  </div>`;
+}
+
+function themesCard(r) {
+  const themes = [...r.themes].sort((a, b) => (b.heat?.ratio ?? 0) - (a.heat?.ratio ?? 0));
+  return `<div class="bg-surface rounded-xl border border-line mt-6">
+    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-semibold">題材熱度</h2>
+      <span class="text-xs text-muted">Google 新聞：最近 7 天日均則數 vs 前期</span>
+    </div>
+    <ul class="divide-y divide-line-soft">${themes.map((t) => {
+      const h = t.heat;
+      if (!h) return `<li class="px-5 py-3 text-sm flex justify-between"><span>${esc(t.label)}</span><span class="text-faint">抓不到新聞</span></li>`;
+      return `<li class="px-5 py-3">
+        <details>
+          <summary class="flex flex-wrap items-center gap-x-4 gap-y-1 cursor-pointer text-sm">
+            <span class="font-medium w-36">${esc(t.label)}</span>
+            ${chipHtml(TREND_STYLE[h.trend])}
+            <span class="num text-sub">近 7 日 ${h.count7} 則 · 日均 ${fmt(h.perDay7, 1)}${h.perDayPrior !== null ? `（前期 ${fmt(h.perDayPrior, 1)}）` : ''}</span>
+            ${h.priceHikes.length ? `<span class="text-xs px-2 py-0.5 rounded bg-warn-bg text-warn border border-warn-line">漲價／缺貨 ${h.priceHikes.length} 則</span>` : ''}
+            <span class="text-xs text-faint ml-auto">${esc(t.sectors.join('、'))}</span>
+          </summary>
+          <ul class="mt-2 pl-1 space-y-1.5 text-sm">
+            ${[...h.priceHikes, ...h.headlines.filter((x) => !h.priceHikes.some((p) => p.title === x.title))].slice(0, 6).map((n) => `
+              <li class="flex gap-2"><span class="text-xs text-muted num shrink-0 w-12">${esc(timeAgo(n.publishedAt))}</span>
+                <a href="${esc(n.link)}" target="_blank" rel="noopener" class="hover:underline ${h.priceHikes.includes(n) ? 'text-warn' : 'text-ink'}">${esc(n.title)}</a>
+                ${n.source ? `<span class="text-xs text-faint shrink-0">${esc(n.source)}</span>` : ''}</li>`).join('')}
+          </ul>
+        </details>
+      </li>`;
+    }).join('')}</ul>
+  </div>`;
+}
+
+function revenueCard(r) {
+  const rows = [...r.watchlist].sort((a, b) => (b.revenue?.yoy3 ?? -Infinity) - (a.revenue?.yoy3 ?? -Infinity));
+  return `<div class="bg-surface rounded-xl border border-line mt-6">
+    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-semibold">自選股營收動能與法人</h2>
+      <span class="text-xs text-muted">依近 3 月平均年增率排序 · 法人為近 5 日</span>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="bg-raised text-muted text-xs"><tr>
+        <th class="text-left font-medium px-5 py-2.5 whitespace-nowrap">標的</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">最新月營收年增</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">近 3 月 vs 前 3 月</th>
+        <th class="font-medium px-3 py-2.5 whitespace-nowrap">動能</th>
+        <th class="font-medium px-3 py-2.5 whitespace-nowrap hidden md:table-cell">12 個月年增率</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">外資</th>
+        <th class="text-right font-medium px-3 py-2.5 whitespace-nowrap">投信</th>
+        <th class="px-3 py-2.5"></th>
+      </tr></thead>
+      <tbody class="divide-y divide-line-soft">${rows.map((w) => {
+        const v = w.revenue;
+        return `<tr class="hover:bg-raised">
+          <td class="px-5 py-2.5 whitespace-nowrap"><div class="font-medium">${esc(w.name)} <span class="text-xs text-muted num">${esc(w.code)}</span></div>
+            <div class="text-xs text-faint">${esc(w.industry || '')}${w.sectorTurnover && w.sectorTurnover.relChange !== null ? ` · 類股資金 <span class="${trendClass(w.sectorTurnover.relChange)}">${signed(w.sectorTurnover.relChange, 1)}%</span>` : ''}</div></td>
+          ${v ? `
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap"><span class="${trendClass(v.yoy)}">${v.yoy === null ? '—' : signed(v.yoy, 1) + '%'}</span>
+            <div class="text-[11px] text-faint">${esc(v.month)}${v.record12 ? ' · <span class="text-up">12 月新高</span>' : ''}</div></td>
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap">${v.yoy3 === null ? '—' : signed(v.yoy3, 1) + '%'} <span class="text-faint">vs</span> ${v.yoyPrev3 === null ? '—' : signed(v.yoyPrev3, 1) + '%'}</td>
+          <td class="px-3 py-2.5">${v.momentum ? chipHtml(MOMENTUM_STYLE[v.momentum]) : '<span class="text-faint">—</span>'}</td>
+          <td class="px-3 py-2.5 hidden md:table-cell" title="${esc(v.series.map((p) => `${p.month} ${p.yoy ?? '—'}%`).join('、'))}">${sparkline(v.series.map((p) => p.yoy), { zero: true })}</td>`
+          : `<td colspan="4" class="px-3 py-2.5 text-xs text-faint">${w.revenueError ? esc(w.revenueError) : 'ETF 或無月營收資料'}</td><td class="hidden md:table-cell"></td>`}
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap ${trendClass(w.inst5?.foreign)}">${lots(w.inst5?.foreign)}</td>
+          <td class="px-3 py-2.5 text-right num whitespace-nowrap ${trendClass(w.inst5?.trust)}">${lots(w.inst5?.trust)}</td>
+          <td class="px-3 py-2.5 text-right"><button data-ta-open="${esc(w.code)}" class="text-faint hover:text-accent-ink px-1" title="技術分析">
+            <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-chart-line"/></svg></button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
 // ── 互動 ─────────────────────────────────────────────
 
 function syncRuleValueField() {
@@ -1318,6 +1568,7 @@ function switchTab(name) {
   location.hash = name;
 
   if (name === 'technical') loadTechnical();
+  if (name === 'radar') loadRadar();
 
   // 手機上選完分頁就把浮層選單收起來，否則會一直蓋住內容
   if (window.matchMedia('(max-width: 767px)').matches) closeMobileMenu();
@@ -1435,6 +1686,7 @@ function initEvents() {
     loadTechnical();
   };
   $('ta-go').addEventListener('click', goTechnical);
+  $('radar-refresh').addEventListener('click', () => loadRadar({ force: true }));
   $('ta-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') goTechnical(); });
   document.addEventListener('change', (event) => {
     if (event.target.id === 'ta-capital') {

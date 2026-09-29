@@ -174,6 +174,28 @@
                 </div>
             </section>
 
+            <!-- ═══ 產業雷達 ═══ -->
+            <section id="tab-radar" class="tab-content">
+                <div class="flex flex-wrap items-center gap-3 mb-5">
+                    <p class="text-sm text-sub flex-1 min-w-[16rem]">資金往哪裡去、題材有沒有升溫、營收跟不跟得上——四種訊號同時出現的產業，最值得提早注意。</p>
+                    <span id="radar-updated" class="text-xs text-muted num"></span>
+                    <button id="radar-refresh" class="px-3 py-2 rounded-lg border border-line text-sm hover:bg-raised">
+                        <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-rotate"/></svg>重新整理
+                    </button>
+                </div>
+                <div id="radar-body"></div>
+                <details class="bg-surface rounded-xl border border-line mt-6">
+                    <summary class="px-5 py-3.5 font-semibold cursor-pointer">這些訊號怎麼算、怎麼用</summary>
+                    <div class="px-5 pb-5 text-sm text-sub leading-relaxed space-y-3">
+                        <p><strong class="text-ink">資金輪動：</strong>每個類股占全市場成交金額的比重，近 5 日平均對比更早的期間。比重連續幾天放大，代表資金正在移入——這通常比股價大漲更早出現。比重低於 1% 的類股不列入訊號，避免零星成交造成的雜訊。</p>
+                        <p><strong class="text-ink">法人流向：</strong>證交所三大法人個股買賣超依產業加總，股數乘上最新收盤換算成金額（歷史日用最新價近似，看方向與相對大小）。目前只含上市股票。外資與投信「同步」買超的天數比單日金額更有意義。</p>
+                        <p><strong class="text-ink">題材熱度：</strong>Google 新聞近 30 天的相關報導，比較最近 7 天的日均則數與前期。媒體開始密集報導，代表市場開始討論；標題出現「漲價、缺貨、供不應求」另外列出——報價上漲是營收與毛利最直接的領先指標。題材清單在 <code>src/radar.js</code> 的 <code>THEMES</code>，想追新題材加一行即可。</p>
+                        <p><strong class="text-ink">營收動能：</strong>月營收是台股最即時的基本面（每月 10 日前公布）。股價常跟著成長的「加速度」走：近 3 月平均年增率比前 3 月高 10 個百分點以上標為加速。</p>
+                        <p><strong class="text-ink">怎麼搭配技術分析：</strong>雷達告訴你「哪個產業、哪幾檔」，技術分析告訴你「什麼價位進場」。產業訊號轉強、個股又回測通道下緣，是最理想的組合。</p>
+                    </div>
+                </details>
+            </section>
+
             <!-- ═══ 新聞 ═══ -->
             <section id="tab-news" class="tab-content">
                 <div class="flex flex-wrap items-center gap-2 mb-5">

@@ -15,7 +15,8 @@
     "watch:css": "tailwindcss -i src/styles.css -o public/tailwind.css --watch",
     "test": "node --test",
     "check-sources": "NODE_OPTIONS=--use-env-proxy node scripts/check-sources.js",
-    "build:demo": "node scripts/build-demo.js"
+    "build:demo": "node scripts/build-demo.js",
+    "report": "NODE_OPTIONS=--use-env-proxy node scripts/daily-report.js"
   },
   "keywords": [
     "台股",

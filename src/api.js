@@ -23,6 +23,13 @@ import { symbolsFor } from './match.js';
 import { recommend } from './recommend.js';
 import { report as technicalReport } from './technical.js';
 import { sampleBars } from './sample-bars.js';
+import * as sector from './sources/sector.js';
+import * as finmind from './sources/finmind.js';
+import * as themeSource from './sources/themes.js';
+import { RADAR } from './config.js';
+import {
+  THEMES, rotation, sectorReturns, aggregateFlows, combineFlows, revenueMetrics, themeHeat, earlySignals, sectorKey,
+} from './radar.js';
 import { OFFLINE } from './config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -279,6 +286,137 @@ export async function technical(query = {}) {
     sample: Boolean(daily.sample),
     notes,
     ...result,
+  };
+}
+
+/** 限制同時進行的請求數（FinMind 免費等級有每小時額度，一次灌太多容易被擋） */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      try { out[i] = { ok: true, value: await fn(items[i]) }; } catch (err) { out[i] = { ok: false, error: err.message }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/**
+ * 產業雷達：資金輪動、法人流向、題材熱度、自選股營收動能。
+ *
+ * 三條資料線同時跑、互不影響：證交所（依序、慢、有磁碟快取）、
+ * FinMind（自選股營收與法人）、Google 新聞（題材熱度）。任何一條失敗
+ * 只讓那一區顯示原因，其他區照常。
+ * @param {{watchlist?: string[]}} body
+ */
+export async function radar(body = {}) {
+  if (OFFLINE) return { ok: false, reason: '產業雷達需要連網（離線模式下沒有全市場的歷史資料可用）' };
+
+  const notes = [];
+  const uni = await universe.load();
+  const codes = [...new Set((body.watchlist ?? []).map((c) => String(c).trim().toUpperCase()).filter(Boolean))].slice(0, 40);
+
+  const twseLine = (async () => {
+    const days = await sector.tradingDays(RADAR.turnoverDays);
+    const turnover = await sector.collect(sector.sectorTurnover, days);
+    // 類股漲跌幅：今天、5 個交易日前、20 個交易日前（最前面那天）
+    const idxDates = [days[days.length - 1], days[Math.max(0, days.length - 6)], days[0]];
+    const index = await sector.collect(sector.sectorIndex, idxDates);
+    const flows = await sector.collect(sector.institutional, days.slice(-RADAR.flowDays));
+    return { days, turnover, index, flows };
+  })();
+
+  const infoLine = finmind.stockInfo();
+
+  const themeLine = Promise.allSettled(THEMES.map((t) => themeSource.themeNews(t.query)));
+
+  const watchLine = mapLimit(codes, 4, async (code) => {
+    const [rev, inst] = await Promise.allSettled([finmind.monthRevenue(code), finmind.institutional(code, 10)]);
+    return {
+      code,
+      revenue: rev.status === 'fulfilled' ? revenueMetrics(rev.value) : null,
+      revenueError: rev.status === 'rejected' ? rev.reason.message : null,
+      institutional: inst.status === 'fulfilled' ? inst.value : [],
+      institutionalError: inst.status === 'rejected' ? inst.reason.message : null,
+    };
+  });
+
+  const [twseRes, infoRes, themeRes, watchRes] = await Promise.allSettled([twseLine, infoLine, themeLine, watchLine]);
+
+  const info = infoRes.status === 'fulfilled' ? infoRes.value : new Map();
+  if (infoRes.status === 'rejected') notes.push(`FinMind 產業分類：${infoRes.reason.message}`);
+
+  // ── 資金輪動與法人
+  let rot = null;
+  let returns = {};
+  let flows = [];
+  if (twseRes.status === 'fulfilled') {
+    const t = twseRes.value;
+    notes.push(...t.turnover.failures, ...t.index.failures, ...t.flows.failures);
+    rot = rotation(t.turnover.out.map((d) => ({ date: d.date, rows: d.value })));
+
+    const idx = Object.fromEntries(t.index.out.map((d) => [d.date, d.value]));
+    const [dLatest, d5, d20] = [t.days[t.days.length - 1], t.days[Math.max(0, t.days.length - 6)], t.days[0]];
+    const known = rot.sectors.length ? new Set(rot.sectors.map((x) => x.name)) : undefined;
+    if (idx[dLatest]) returns = sectorReturns(idx[dLatest], { r5: idx[d5], r20: idx[d20] }, { only: known });
+
+    const industryOf = new Map([...info].map(([code, r]) => [code, r.industry]));
+    const priceOf = new Map(uni.stocks.map((s) => [s.code, s.close]));
+    flows = combineFlows(t.flows.out.map((d) => ({ date: d.date, flows: aggregateFlows(d.value, industryOf, priceOf) })));
+    if (!info.size) notes.push('沒有產業分類資料，無法把法人買賣超歸到產業');
+  } else {
+    notes.push(`證交所資料：${twseRes.reason?.message || twseRes.reason}`);
+  }
+
+  // ── 題材
+  const now = new Date();
+  const themes = THEMES.map((t, i) => {
+    const r = themeRes.status === 'fulfilled' ? themeRes.value[i] : null;
+    if (!r || r.status === 'rejected') {
+      notes.push(`題材「${t.label}」新聞：${r?.reason?.message || '抓取失敗'}`);
+      return { ...t, heat: null };
+    }
+    return { ...t, heat: themeHeat(r.value, now) };
+  });
+
+  // ── 自選股
+  const watch = (watchRes.status === 'fulfilled' ? watchRes.value : []).map((w, i) => {
+    const code = codes[i];
+    const stock = uni.byCode.get(code);
+    const industry = info.get(code)?.industry ?? null;
+    const v = w?.ok ? w.value : { code, revenue: null, revenueError: w?.error, institutional: [] };
+    const recent5 = v.institutional.slice(-5);
+    const sum = (k) => recent5.reduce((a, d) => a + d[k], 0);
+    const sec = industry ? rot?.sectors.find((s) => s.name === sectorKey(industry)) : null;
+    return {
+      code,
+      name: stock?.name || info.get(code)?.name || code,
+      industry,
+      close: stock?.close ?? null,
+      changePercent: stock?.changePercent ?? null,
+      revenue: v.revenue,
+      revenueError: v.revenueError,
+      inst5: recent5.length ? { days: recent5.length, foreign: sum('foreign'), trust: sum('trust'), dealer: sum('dealer') } : null,
+      institutional: v.institutional,
+      sectorTurnover: sec ? { shareRecent: sec.shareRecent, relChange: sec.relChange } : null,
+    };
+  });
+  const revErrors = [...new Set(watch.map((w) => w.revenueError).filter(Boolean))];
+  if (revErrors.length) notes.push(`月營收：${revErrors.join('；')}`);
+
+  return {
+    ok: true,
+    updatedAt: new Date().toISOString(),
+    rotation: rot,
+    returns,
+    flows: { days: RADAR.flowDays, market: '上市', sectors: flows },
+    themes,
+    watchlist: watch,
+    signals: earlySignals({ rotation: rot, flows, themes, returns }),
+    notes: [...new Set(notes)],
+    disclaimer: '整理公開資訊與歷史數據，訊號提早出現不代表一定會發動；不構成投資建議。',
   };
 }
 

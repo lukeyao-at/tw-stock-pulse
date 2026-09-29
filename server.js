@@ -1,7 +1,7 @@
 /**
  * HTTP 伺服器：靜態檔 + JSON API。
  *
- * 刻意不使用 Express —— 這支服務只有五條路由，Node 內建的 http
+ * 刻意不使用 Express —— 這支服務只有六條路由，Node 內建的 http
  * 就夠了，換來的是零執行期依賴（不必 npm install 就能跑）。
  */
 
@@ -104,6 +104,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/technical') {
       return sendJson(res, 200, await api.technical(Object.fromEntries(url.searchParams)));
+    }
+
+    if (url.pathname === '/api/radar') {
+      const body = req.method === 'POST' ? await readBody(req) : { watchlist: (url.searchParams.get('codes') || '').split(',') };
+      return sendJson(res, 200, await api.radar(body));
     }
 
     if (url.pathname === '/api/dashboard') {

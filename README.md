@@ -14,8 +14,9 @@
 ```bash
 npm start                # http://localhost:8420
 npm run offline          # 用內建樣本資料跑，完全不連外
-npm test                 # 84 個單元測試
+npm test                 # 100 個單元測試
 npm run check-sources    # 逐一實測每個公開來源是否還活著
+npm run report           # 每日盤後報告（產業雷達 + 持股／自選股通道訊號），存到 reports/
 ```
 
 Node 需要 18.17 以上（用到內建 `fetch` 與 `node:test`）。
@@ -90,6 +91,29 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
   並對照同期間買進持有。用真實資料跑過的觀察：在強勢多頭裡「碰上緣就賣」常常
   遠輸買進持有，指標過濾的效果則因股而異——這正是要逐檔驗證的原因
 
+### 產業雷達（資金輪動 + 法人 + 題材 + 營收）
+提早發現「下一個族群」：股價大漲之前，通常會先看到四件事，這個分頁把它們量化並交叉比對：
+
+| 訊號 | 資料 | 怎麼算 |
+|---|---|---|
+| 資金 | 證交所各類股成交金額（近 20 個交易日） | 類股占全市場成交比重，近 5 日 vs 之前；比重 < 1% 的類股不算 |
+| 法人 | 證交所三大法人個股買賣超（上市，近 5 日） | 依產業加總成金額；看外資與投信「同步」買超的天數 |
+| 題材 | Google 新聞搜尋（近 30 天，每題材最多 100 則） | 近 7 日日均則數 vs 前期；熱門題材滿 100 則時用實際涵蓋天數計算 |
+| 營收 | FinMind 月營收（自選股） | 年增率、近 3 月 vs 前 3 月（加速／減速）、是否創 12 個月新高 |
+
+- 同一產業同時出現的訊號愈多，排在「早期訊號」愈前面
+- 標題含「漲價、缺貨、供不應求、報價續漲」的新聞另外列出——報價是營收與毛利最直接的領先指標
+- 題材清單在 `src/radar.js` 的 `THEMES`，下一波想追什麼（例如某個新概念）加一行即可
+- 證交所的 WAF 對密集請求很敏感：請求依序送出、間隔 2.5 秒，遇到限流（307）等 20 秒重試一次，
+  再被擋就 10 分鐘內不再送出，只用快取。過去交易日寫進 `data/cache/`（已 gitignore），永遠只抓一次，
+  所以第一次約 1 分鐘，之後幾秒
+
+### 每日盤後報告
+`npm run report` 產生 Markdown 報告（存到 `reports/`，已 gitignore）：大盤、產業雷達的早期訊號、
+資金輪動、法人流向、題材熱度與漲價標題、持股狀況，以及自選股裡「有訊號」的標的（碰到通道邊緣、
+突破、跌破、營收減速）——沒事的不列，每天要看的是變化。清單在 `data/watchlist.json`
+（要和 `public/app.js` 的 `DEFAULT_WATCHLIST` 一致，有測試把關）。
+
 ### 推薦標的
 五個具名因子加權計分，權重隨你的風險偏好與投資目標改變：
 
@@ -138,6 +162,9 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
 | 上櫃行情／估值／基本資料 | `www.tpex.org.tw/openapi/v1/...` | ✅ 真實資料 |
 | 盤中即時報價 | `mis.twse.com.tw/stock/api/getStockInfo.jsp` | ❌ 502，防護目前最嚴，找不到替代 |
 | 歷史日成交（均量基準） | `www.twse.com.tw/exchangeReport/STOCK_DAY` | ✅ 真實資料（2026-09-23 雲端環境間歇性 reset） |
+| 類股成交／類股指數／三大法人 | `www.twse.com.tw/rwd/zh/afterTrading/BFIAMU`、`MI_INDEX`、`fund/T86` | ✅ 真實資料（2026-09-29 實測；密集請求會被限流） |
+| 月營收、個股法人、產業分類 | FinMind `api.finmindtrade.com`（免費註冊等級，只能逐檔查） | ✅ 真實資料 |
+| 題材新聞 | Google 新聞搜尋 RSS | ✅ 真實資料 |
 | 技術分析日 K（兩年） | `query1.finance.yahoo.com/v8/finance/chart`，備援：證交所 STOCK_DAY／櫃買 tradingStock 月資料 | ✅ 真實資料（2026-09-23 實測） |
 | 新聞 | Yahoo 股市、經濟日報、ETtoday（見 `NEWS_FEEDS`） | ✅ 真實資料 |
 
@@ -200,6 +227,8 @@ src/
   sentiment.js         中文利多／利空詞典判讀
   recommend.js         推薦計分引擎
   technical.js         技術分析：通道、指標、綜合判讀、交易計畫、歷史驗證
+  radar.js             產業雷達：資金輪動、法人流向、題材熱度、營收動能、早期訊號
+  disk-cache.js        磁碟快取（已收盤的歷史資料只抓一次）
   sample-bars.js       離線／展示版用的模擬日 K（確定性）
   portfolio.js         持股損益與產業集中度
   alerts.js            提醒規則評估
@@ -207,7 +236,7 @@ src/
   sources/             twse / tpex / quotes / news / history
 public/                單頁 UI（自帶 Tailwind CSS 與 SVG 圖示）
 data/                  離線樣本資料
-test/                  84 個單元測試
+test/                  100 個單元測試
 ```
 
 API：
@@ -216,6 +245,7 @@ API：
 |---|---|
 | `POST /api/dashboard` | 主要端點。帶入個人化設定，一次回傳整個畫面的資料 |
 | `GET /api/technical?code=&lookback=&capital=&riskPct=` | 單一個股技術分析（通道長度 30～240 日，預設 120） |
+| `POST /api/radar` | 產業雷達（body：`{ watchlist }`） |
 | `GET /api/search?q=` | 個股搜尋（代號或名稱） |
 | `GET /api/health` | 來源健康度與快取狀態 |
 
@@ -240,6 +270,12 @@ API：
   它能告訴你「這套規則在這檔股票上過去管不管用」，不能保證未來。
 - **通道用還原除權息後的價格計算**（Yahoo 的 adjclose），否則除息跳空會被誤判成
   「回測下緣」。改走交易所備援時沒有還原資料，畫面上會提示。
+- **法人流向只含上市股票**，而且金額是「股數 × 最新收盤」的近似。上櫃的全市場法人資料
+  免費來源只有當天，沒辦法回看多日。
+- **題材熱度量的是「媒體報導量」**，不是資金或基本面。熱度升溫只代表開始被討論，
+  要搭配資金與營收一起看；Google 新聞的排序與涵蓋範圍也不是公開的，只能當相對指標。
+- **FinMind token 寫在 `src/config.js`**（使用者決定：私人 repo、免費帳號）。repo 若改成公開，
+  請改用 `FINMIND_TOKEN` 環境變數並到 FinMind 重新產生 token。
 - **Yahoo 的 chart 端點是非官方公開端點**，隨時可能改版或限流；抓不到時會退回
   證交所／櫃買的月資料（一檔要打 12 次，慢很多）。注意 Yahoo 對完整的 Chrome UA
   會固定回 429，只能帶簡短的 `Mozilla/5.0`（見 `src/config.js` 的 `HISTORY`）。

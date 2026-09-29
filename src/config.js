@@ -29,6 +29,8 @@ export const TTL = {
   events: 3600,      // 除權息、法說會等事件
   news: 5 * 60,      // 新聞
   bars: 30 * 60,     // 技術分析日 K（盤後才會變，盤中半小時更新一次足夠）
+  revenue: 12 * 3600,// 月營收（每月 10 日前公布，半天更新一次綽綽有餘）
+  themes: 3 * 3600,  // 題材新聞熱度
 };
 
 /**
@@ -130,3 +132,41 @@ export const HISTORY = {
 
 /** 個股新聞樣板；{code} 會被代號取代（Yahoo 用 2330.TW 這種格式） */
 export const NEWS_SYMBOL_FEED = 'https://tw.stock.yahoo.com/rss?s={code}.TW';
+
+/**
+ * FinMind 開放資料 API（產業雷達用：月營收、法人買賣、產業分類）。
+ *
+ * 免費註冊等級（register）只能「一檔一檔查」，不能一次查全市場某一天，
+ * 所以只對自選股查。token 依使用者要求直接寫在這裡（私人 repo、免費帳號）；
+ * 設了 FINMIND_TOKEN 環境變數會優先使用。
+ */
+export const FINMIND = {
+  base: 'https://api.finmindtrade.com/api/v4/data',
+  token: process.env.FINMIND_TOKEN
+    || 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiYWJib3l5YW8yQGdtYWlsLmNvbSIsImVtYWlsIjoiYWJib3l5YW8yQGdtYWlsLmNvbSIsInRva2VuX3ZlcnNpb24iOjB9.XlF52Xp1p1LpzwQlJYP_wvpMX04VerDLn8uf_XfRZxQ',
+};
+
+/**
+ * 產業雷達的全市場資料。
+ *
+ * 證交所的 WAF 對短時間大量請求很敏感（2026-09-29 實測：連打十幾支後
+ * 開始回「因為安全性考量」的攔截頁），所以：一律依序抓、每支之間停
+ * twseDelayMs；已經過去的交易日寫進磁碟快取，永遠只抓一次。
+ */
+export const RADAR = {
+  /** 各類股成交金額，date=YYYYMMDD */
+  sectorTurnover: 'https://www.twse.com.tw/rwd/zh/afterTrading/BFIAMU?date={date}&response=json',
+  /** 各類股指數收盤，算類股漲跌幅 */
+  sectorIndex: 'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date}&type=IND&response=json',
+  /** 三大法人個股買賣超（上市，不含權證） */
+  institutional: 'https://www.twse.com.tw/rwd/zh/fund/T86?date={date}&selectType=ALLBUT0999&response=json',
+  /** Google 新聞搜尋 RSS：一次最多 100 則、附發布時間，拿來量題材熱度 */
+  googleNews: 'https://news.google.com/rss/search?q={q}%20when:30d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant',
+  /** 成交比重看幾個交易日 */
+  turnoverDays: 20,
+  /** 法人買賣超看幾個交易日 */
+  flowDays: 5,
+  twseDelayMs: 2500,
+  /** 磁碟快取位置（已列入 .gitignore） */
+  cacheDir: 'data/cache',
+};
