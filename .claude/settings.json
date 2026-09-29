@@ -11,5 +11,8 @@
         ]
       }
     ]
+  },
+  "env": {
+    "FINMIND_TOKEN": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiYWJib3l5YW8yQGdtYWlsLmNvbSIsImVtYWlsIjoiYWJib3l5YW8yQGdtYWlsLmNvbSIsInRva2VuX3ZlcnNpb24iOjB9.XlF52Xp1p1LpzwQlJYP_wvpMX04VerDLn8uf_XfRZxQ"
   }
 }
