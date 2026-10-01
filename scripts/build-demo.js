@@ -10,7 +10,7 @@
  *   npm run build:demo
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -62,6 +62,28 @@ const universe = JSON.parse(read('data/sample-universe.json'));
 const news = JSON.parse(read('data/sample-news.json'));
 
 /**
+ * 產業雷達需要全市場 20 個交易日的資料，展示版無法現場算，改放一份真實資料快照
+ * （重新產生：npm start 後 POST /api/radar，把回應存成 data/sample-radar.json）。
+ */
+const radarSnapshot = existsSync(path.join(ROOT, 'data/sample-radar.json'))
+  ? JSON.parse(read('data/sample-radar.json'))
+  : null;
+
+/**
+ * 前端的預設自選股是使用者的真實清單，但樣本宇宙只有 50 檔；展示版只留樣本裡
+ * 有的，否則畫面一半是「查無資料」。
+ */
+const sampleCodes = new Set(universe.stocks.map((s) => s.code));
+function demoAppJs() {
+  const src = read('public/app.js');
+  const re = /const DEFAULT_WATCHLIST = \[([\s\S]*?)\];/;
+  const m = src.match(re);
+  if (!m) throw new Error('在 public/app.js 找不到 DEFAULT_WATCHLIST');
+  const codes = [...m[1].matchAll(/'([0-9A-Z]+)'/g)].map((x) => x[1]).filter((c) => sampleCodes.has(c));
+  return src.replace(re, `const DEFAULT_WATCHLIST = ${JSON.stringify(codes)};`);
+}
+
+/**
  * 瀏覽器端的 dashboard 組裝。
  *
  * 這是 demo 專屬的接線，對應 src/api.js 的 dashboard()：後端版本要處理
@@ -72,6 +94,7 @@ const glue = `
 const STOCKS = ${JSON.stringify(universe.stocks)};
 const NEWS = ${JSON.stringify(news.items)};
 const BY_CODE = new Map(STOCKS.map((s) => [s.code, s]));
+const RADAR_SNAPSHOT = ${JSON.stringify(radarSnapshot)};
 const ALL_NAMES = STOCKS.map((s) => s.name).filter(Boolean);
 
 /** 樣本事件：以今天為基準往後排，讓事件提醒也能實際觸發 */
@@ -194,6 +217,11 @@ const asJson = (data) => new Response(JSON.stringify(data), {
 window.fetch = async (url, opts) => {
   const href = String(url);
   if (href === '/api/dashboard') return asJson(buildDashboard(JSON.parse(opts?.body || '{}')));
+  if (href === '/api/radar') {
+    if (!RADAR_SNAPSHOT) return asJson({ ok: false, reason: '展示版沒有附產業雷達快照；請用 npm start 跑真正的版本' });
+    const asOf = RADAR_SNAPSHOT.rotation?.to || RADAR_SNAPSHOT.updatedAt?.slice(0, 10);
+    return asJson({ ...RADAR_SNAPSHOT, notes: [\`展示版：這是 \${asOf} 的真實資料快照，不會更新\`, ...(RADAR_SNAPSHOT.notes || [])] });
+  }
   if (href.startsWith('/api/technical')) {
     return asJson(buildTechnical(new URLSearchParams(href.split('?')[1] || '')));
   }
@@ -217,7 +245,7 @@ html = html.replace(
 // app.js 前面插入引擎與 fetch 攔截
 html = html.replace(
   '<script src="/app.js"></script>',
-  `<script>\n(function () {\n${modules}\n${glue}\n})();\n</script>\n<script>\n${read('public/app.js')}\n</script>`,
+  `<script>\n(function () {\n${modules}\n${glue}\n})();\n</script>\n<script>\n${demoAppJs()}\n</script>`,
 );
 
 // 展示版的標題與說明
