@@ -177,6 +177,10 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  /* 格線的子項預設 min-width:auto，裡面若有可橫向捲動的寬表格或圖，會把整欄撐寬、
+     手機上整頁跟著被推出螢幕。統一設 0，寬內容就只在自己的捲動容器裡捲。 */
+  .grid > * { min-width: 0; }
+
   /* 數字欄位等寬，表格才不會跳動 */
   .num { font-variant-numeric: tabular-nums; }
 

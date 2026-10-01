@@ -329,10 +329,10 @@ function renderOverview() {
         <tbody class="divide-y divide-line-soft">
           ${latest.watchlist.map((s) => `
             <tr class="hover:bg-raised">
-              <td class="px-5 py-3">
+              <td class="px-5 py-3 whitespace-nowrap">
                 <div class="font-medium">${esc(s.name)}</div>
                 <div class="text-xs text-muted num">${esc(s.code)}
-                  ${s.industry ? `<span class="ml-1 text-faint">${esc(s.industry)}</span>` : ''}
+                  ${s.industry ? `<span class="ml-1 text-faint hidden sm:inline">${esc(s.industry)}</span>` : ''}
                   ${s.unknown ? '<span class="ml-1 text-warn">查無資料</span>' : ''}
                 </div>
               </td>
@@ -797,6 +797,7 @@ function renderTechnical() {
   const a = t.analysis;
   const ch = a.channel;
   const notes = [...(t.notes ?? [])];
+  const { chart, narrow } = sizeChart(t.chart);
 
   $('ta-body').innerHTML = `
     ${notes.length ? `<div class="rounded-lg border px-4 py-3 text-sm bg-warn-bg border-warn-line text-warn mb-6">
@@ -812,10 +813,11 @@ function renderTechnical() {
         <div class="p-3 sm:p-4">
           ${chartLegend()}
           <!-- 手機上圖不縮到看不清楚，改成在卡片內左右捲動 -->
-          <div class="overflow-x-auto -mx-1 px-1"><div id="ta-charts" class="relative min-w-[600px]">
-            ${priceChartSvg(t.chart)}
-            ${oscChartSvg(t.chart, 'rsi')}
-            ${oscChartSvg(t.chart, 'kd')}
+          ${narrow && chart !== t.chart ? `<p class="text-[11px] text-faint px-1 mb-1">手機版只畫近 ${NARROW_BARS} 個交易日；通道與指標仍以完整資料計算</p>` : ''}
+          <div><div id="ta-charts" class="relative">
+            ${priceChartSvg(chart)}
+            ${oscChartSvg(chart, 'rsi')}
+            ${oscChartSvg(chart, 'kd')}
             <div id="ta-tip" class="hidden absolute z-10 pointer-events-none bg-surface border border-line rounded-lg shadow-lg px-3 py-2 text-xs num min-w-[10rem]"></div>
           </div></div>
         </div>
@@ -844,7 +846,7 @@ function renderTechnical() {
       <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-info"/></svg>${esc(t.disclaimer)}
     </p>`;
 
-  bindChartHover(t.chart);
+  bindChartHover(chart);
 }
 
 function verdictCard(t) {
@@ -1073,8 +1075,40 @@ function backtestCard(bt) {
 
 // ── 技術分析圖（手刻 SVG，不依賴任何圖表函式庫）
 
-const CHART_W = 800;
-const PAD = { left: 52, right: 88 };
+// 桌機用固定 800 寬的 viewBox 讓它等比縮放；手機改成依實際寬度畫，字才不會縮到看不見
+// （見 renderTechnical 的 sizeChart）。
+let CHART_W = 800;
+let PAD = { left: 52, right: 88 };
+
+/** 手機寬度：只畫近 n 根，否則 150 根 K 線擠在 300px 裡每根不到 2px */
+const NARROW_BARS = 90;
+
+function lastBars(c, n) {
+  if (c.bars.length <= n) return c;
+  const start = c.bars.length - n;
+  const cut = (arr) => arr.slice(start);
+  const first = c.bars[start].date;
+  return {
+    ...c,
+    bars: cut(c.bars), ma20: cut(c.ma20), ma60: cut(c.ma60), rsi: cut(c.rsi), k: cut(c.k), d: cut(c.d),
+    channel: c.channel.filter((p) => p.date >= first),
+    markers: c.markers.filter((m) => m.date >= first),
+  };
+}
+
+/** 依畫面寬度決定圖的尺寸，回傳要畫的那段資料 */
+function sizeChart(chart) {
+  const narrow = window.matchMedia('(max-width: 639px)').matches;
+  if (!narrow) {
+    CHART_W = 800;
+    PAD = { left: 52, right: 88 };
+    return { chart, narrow };
+  }
+  // 卡片左右 padding（p-3）與邊框約 26px
+  CHART_W = Math.max(300, Math.round(($('ta-body').clientWidth || 360) - 26));
+  PAD = { left: 40, right: 68 };
+  return { chart: lastBars(chart, NARROW_BARS), narrow };
+}
 const series = (n) => `rgb(var(--c-${n}))`;
 
 function chartLegend() {
@@ -1687,6 +1721,18 @@ function initEvents() {
   };
   $('ta-go').addEventListener('click', goTechnical);
   $('radar-refresh').addEventListener('click', () => loadRadar({ force: true }));
+
+  // 手機轉向、桌機縮放視窗時，技術分析圖要依新寬度重畫
+  let resizeTimer = null;
+  let lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastWidth) return; // 手機捲動時網址列伸縮只改高度，不必重畫
+    lastWidth = window.innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (taLatest && $('tab-technical').classList.contains('active')) renderTechnical();
+    }, 200);
+  });
   $('ta-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') goTechnical(); });
   document.addEventListener('change', (event) => {
     if (event.target.id === 'ta-capital') {
