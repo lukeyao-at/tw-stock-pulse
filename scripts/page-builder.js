@@ -106,7 +106,7 @@ function sampleEvents(watchlist) {
   });
 }
 
-const snapshotNote = () => \`盤後快照：資料至 \${META.asOf}（\${new Date(META.generatedAt).toLocaleString('zh-TW', { hour12: false })} 產生），每個交易日 16:30 後自動更新\`;
+const snapshotNote = () => \`盤後快照：資料至 \${META.asOf}（\${new Date(META.generatedAt).toLocaleString('zh-TW', { hour12: false })} 產生，自選股依\${META.watchlistSource || '預設清單'} \${(META.watchlist || []).length} 檔），每個交易日 16:30 後自動更新\`;
 
 function buildDashboard(body) {
   const watchlist = [];

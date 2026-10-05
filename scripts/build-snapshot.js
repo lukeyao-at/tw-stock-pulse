@@ -35,12 +35,16 @@ const listFromFile = (json) => (Array.isArray(json.watchlist)
 
 const fileArg = process.argv.indexOf('--watchlist-file');
 let codes = listFromFile(base);
+// 頁面上會顯示清單來源，讓使用者看得出排程有沒有讀到雲端同步的自選股
+let watchlistSource = '預設清單';
 if (fileArg !== -1) {
   const file = process.argv[fileArg + 1];
   try {
     const fromFile = listFromFile(JSON.parse(readFileSync(file, 'utf8')));
-    if (fromFile.length) codes = fromFile;
-    else log(`⚠ ${file} 沒有自選股，改用 data/watchlist.json`);
+    if (fromFile.length) {
+      codes = fromFile;
+      watchlistSource = '雲端同步';
+    } else log(`⚠ ${file} 沒有自選股，改用 data/watchlist.json`);
   } catch (err) {
     log(`⚠ 讀不到 ${file}（${err.message}），改用 data/watchlist.json`);
   }
@@ -133,7 +137,7 @@ const html = buildPage({
   events,
   barsByCode,
   radar,
-  meta: { asOf, generatedAt: new Date().toISOString(), watchlist: codes },
+  meta: { asOf, generatedAt: new Date().toISOString(), watchlist: codes, watchlistSource },
   transformAppJs: useSnapshotWatchlist,
   title: '台股脈動',
 });
@@ -142,4 +146,4 @@ mkdirSync(path.join(ROOT, 'snapshot'), { recursive: true });
 const out = path.join(ROOT, 'snapshot/index.html');
 writeFileSync(out, html);
 const mb = (Buffer.byteLength(html) / 1024 / 1024).toFixed(2);
-console.log(`snapshot/index.html 已產生 · ${mb} MB · 資料至 ${asOf} · ${uni.stocks.length} 檔個股 · 日 K ${Object.keys(barsByCode).length} 檔 · 新聞 ${uniqueNews.length} 則 · 事件 ${events.length} 筆 · 產業雷達 ${radar?.ok ? '有' : '無'}`);
+console.log(`snapshot/index.html 已產生 · ${mb} MB · 資料至 ${asOf} · 自選股來源：${watchlistSource} · ${uni.stocks.length} 檔個股 · 日 K ${Object.keys(barsByCode).length} 檔 · 新聞 ${uniqueNews.length} 則 · 事件 ${events.length} 筆 · 產業雷達 ${radar?.ok ? '有' : '無'}`);
