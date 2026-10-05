@@ -103,6 +103,22 @@ await tab(p, 'radar'); await p.waitForTimeout(800);
 check('產業雷達載入', (await visibleText(p, '#radar-body')).includes('早期訊號'));
 await p.click('#radar-refresh'); await p.waitForTimeout(800);
 check('產業雷達重新整理', (await visibleText(p, '#radar-body')).includes('早期訊號'));
+// 法人流向：產業／買超個股／賣超個股切換（展示版的雷達快照若沒有個股資料，就只驗證切換本身）
+await p.click('[data-flow-view=buy]'); await p.waitForTimeout(300);
+const hasStocks = await p.evaluate(() => Boolean(radarLatest?.flows?.stocks?.buys?.length));
+check('法人流向：切到買超個股', await p.evaluate(() => profile.flowView === 'buy')
+  && (!hasStocks || (await p.$$('#radar-body ol li')).length > 0));
+if (hasStocks) {
+  const before = await p.evaluate(() => profile.watchlist.length);
+  const addBtn = await p.$('#radar-body ol [data-add-watch]');
+  if (addBtn) {
+    await addBtn.click(); await p.waitForTimeout(500);
+    check('法人流向：從排行加入自選', (await p.evaluate(() => profile.watchlist.length)) === before + 1);
+  }
+}
+await p.click('[data-flow-view=sell]'); await p.waitForTimeout(300);
+check('法人流向：切到賣超個股', await p.evaluate(() => profile.flowView === 'sell'));
+await p.click('[data-flow-view=sector]'); await p.waitForTimeout(300);
 
 // 策略分析工具不該出現任何損益欄位
 check('沒有持股損益分頁', !(await p.$('#tab-holdings')) && !(await p.$('[data-tab=holdings]')));

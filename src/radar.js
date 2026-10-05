@@ -244,6 +244,82 @@ export function combineFlows(daily) {
     .sort((a, b) => b.total - a.total);
 }
 
+/**
+ * 法人買賣超個股排行：多日加總，看法人「實際在買哪幾檔」。
+ *
+ * 用金額排序而不是張數 —— 一張台積電和一張低價股的份量差上百倍。
+ * 同時算出連續買超的天數：法人連續幾天站在同一邊，比單日大買更有意義
+ * （單日可能只是換手或調節）。ETF 不列入，它們反映的是資金配置而不是選股。
+ *
+ * @param {Array<{date:string, rows:Array<{code, foreign, trust, dealer}>}>} daily 由舊到新
+ * @param {{industryOf:Map, priceOf:Map, nameOf:Map}} lookup
+ * @param {{top?:number, perSector?:number}} opts
+ */
+export function stockFlows(daily, { industryOf, priceOf, nameOf }, { top = 15, perSector = 3 } = {}) {
+  const by = new Map();
+  daily.forEach(({ rows }, dayIndex) => {
+    for (const r of rows) {
+      const industry = industryOf.get(r.code);
+      const price = priceOf.get(r.code);
+      if (!industry || NOT_INDUSTRY.test(industry) || !isNum(price)) continue;
+      const s = by.get(r.code) ?? {
+        code: r.code, name: nameOf.get(r.code) || r.code, sector: sectorKey(industry), price,
+        foreignShares: 0, trustShares: 0, dealerShares: 0, net: [],
+      };
+      s.foreignShares += r.foreign ?? 0;
+      s.trustShares += r.trust ?? 0;
+      s.dealerShares += r.dealer ?? 0;
+      s.net[dayIndex] = (r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0);
+      by.set(r.code, s);
+    }
+  });
+
+  const days = daily.length;
+  const list = [...by.values()].map((s) => {
+    const net = Array.from({ length: days }, (_, i) => s.net[i] ?? 0);
+    // 從最近一天往回數，同方向的天數（買超為正、賣超為負）
+    const sign = Math.sign(net[days - 1] ?? 0);
+    let streak = 0;
+    for (let i = days - 1; i >= 0 && sign !== 0 && Math.sign(net[i]) === sign; i--) streak++;
+    const foreign = s.foreignShares * s.price;
+    const trust = s.trustShares * s.price;
+    const dealer = s.dealerShares * s.price;
+    return {
+      code: s.code,
+      name: s.name,
+      sector: s.sector,
+      price: s.price,
+      foreign: Math.round(foreign),
+      trust: Math.round(trust),
+      dealer: Math.round(dealer),
+      total: Math.round(foreign + trust + dealer),
+      foreignLots: Math.round(s.foreignShares / 1000),
+      trustLots: Math.round(s.trustShares / 1000),
+      totalLots: Math.round((s.foreignShares + s.trustShares + s.dealerShares) / 1000),
+      buyDays: net.filter((v) => v > 0).length,
+      streak: streak * sign,
+      days,
+    };
+  }).filter((s) => s.total !== 0);
+
+  const buys = list.filter((s) => s.total > 0).sort((a, b) => b.total - a.total);
+  const sells = list.filter((s) => s.total < 0).sort((a, b) => a.total - b.total);
+
+  // 每個產業買超最多的幾檔，讓產業列可以展開看「是誰在撐」
+  const bySector = {};
+  for (const s of buys) {
+    const arr = (bySector[s.sector] ??= []);
+    if (arr.length < perSector) arr.push(s);
+  }
+  const sellBySector = {};
+  for (const s of sells) {
+    const arr = (sellBySector[s.sector] ??= []);
+    if (arr.length < perSector) arr.push(s);
+  }
+
+  return { days, buys: buys.slice(0, top), sells: sells.slice(0, top), bySector, sellBySector };
+}
+
 // ── 營收動能 ─────────────────────────────────────────
 
 /**

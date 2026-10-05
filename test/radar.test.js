@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  sectorKey, rotation, sectorReturns, aggregateFlows, combineFlows, revenueMetrics, themeHeat, earlySignals,
+  sectorKey, rotation, sectorReturns, aggregateFlows, combineFlows, stockFlows, revenueMetrics, themeHeat, earlySignals,
 } from '../src/radar.js';
 import { splitSource } from '../src/sources/themes.js';
 
@@ -177,4 +177,35 @@ test('每日報告的清單（data/watchlist.json）與前端預設自選股一�
   const block = app.match(/const DEFAULT_WATCHLIST = \[([\s\S]*?)\];/)[1];
   const fromApp = [...block.matchAll(/'([0-9A-Z]+)'/g)].map((m) => m[1]);
   assert.deepEqual(fromApp, fromJson);
+});
+
+test('法人個股排行：依金額排序、算連續買賣天數、排除 ETF、每產業列出主力', () => {
+  const lookup = {
+    industryOf: new Map([['2330', '半導體業'], ['2303', '半導體業'], ['2603', '航運業'], ['0050', 'ETF'], ['8046', '電子零組件業']]),
+    priceOf: new Map([['2330', 1000], ['2303', 50], ['2603', 200], ['0050', 100], ['8046', 1000]]),
+    nameOf: new Map([['2330', '台積電'], ['2303', '聯電'], ['2603', '長榮'], ['0050', '元大台灣50'], ['8046', '南電']]),
+  };
+  const day = (rows) => ({ date: 'd', rows });
+  const daily = [
+    day([{ code: '2330', foreign: -1000, trust: 0, dealer: 0 }, { code: '2303', foreign: 100000, trust: 0, dealer: 0 }]),
+    day([{ code: '2330', foreign: 3000, trust: 1000, dealer: 0 }, { code: '0050', foreign: 9e9, trust: 0, dealer: 0 }]),
+    day([{ code: '2330', foreign: 2000, trust: 0, dealer: 0 }, { code: '2603', foreign: -5000, trust: 0, dealer: 0 }, { code: '8046', foreign: 2000, trust: 0, dealer: 0 }]),
+  ];
+  const r = stockFlows(daily, lookup, { top: 10, perSector: 2 });
+  // 台積電 (−1000+4000+2000)×1000 = 500 萬；聯電 100000×50 = 500 萬但只買一天且不是最近
+  // 金額相同時維持出現順序（排序是穩定的）
+  assert.deepEqual(r.buys.map((s) => s.code), ['2330', '2303', '8046']);
+  const tsmc = r.buys.find((s) => s.code === '2330');
+  assert.equal(tsmc.total, 5_000_000);
+  assert.equal(tsmc.foreignLots, 4);
+  assert.equal(tsmc.trustLots, 1);
+  assert.equal(tsmc.streak, 2, '最近兩天連續買超');
+  assert.equal(tsmc.buyDays, 2);
+  assert.equal(r.buys.find((s) => s.code === '2303').streak, 0, '最近一天沒有交易，不算連續');
+  assert.ok(!r.buys.some((s) => s.code === '0050'), 'ETF 不列入');
+  assert.deepEqual(r.sells.map((s) => s.code), ['2603']);
+  assert.equal(r.sells[0].streak, -1);
+  assert.deepEqual(r.bySector['半導體'].map((s) => s.code).sort(), ['2303', '2330']);
+  assert.equal(r.bySector['電子零組件'][0].code, '8046');
+  assert.equal(r.sellBySector['航運'][0].code, '2603');
 });

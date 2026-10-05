@@ -1573,22 +1573,71 @@ function rotationCard(r) {
   </div>`;
 }
 
+const FLOW_VIEWS = [['sector', '依產業'], ['buy', '買超個股'], ['sell', '賣超個股']];
+
 function flowsCard(r) {
-  const f = r.flows.sectors.filter((x) => x.total !== 0);
-  if (!f.length) return `<div class="min-w-0 lg:col-span-2 bg-surface rounded-xl border border-line">${emptyState('法人資料暫時抓不到', 'wallet')}</div>`;
-  const top = [...f.slice(0, 6), ...f.slice(-6).filter((x) => !f.slice(0, 6).includes(x))];
-  const maxAbs = Math.max(...top.map((x) => Math.abs(x.total)));
+  const view = FLOW_VIEWS.some(([k]) => k === profile.flowView) ? profile.flowView : 'sector';
+  const st = r.flows.stocks;
+  const range = r.flows.from && r.flows.to
+    ? (r.flows.from === r.flows.to ? r.flows.to.slice(5) : `${r.flows.from.slice(5)}～${r.flows.to.slice(5)}`)
+    : '';
+  const tabs = FLOW_VIEWS.map(([k, label]) => `<button data-flow-view="${k}" class="px-2.5 py-1 text-xs rounded-md ${
+    k === view ? 'bg-brand-600 text-white' : 'text-sub hover:bg-raised'}">${label}</button>`).join('');
+
+  let body;
+  if (view === 'sector') {
+    const f = r.flows.sectors.filter((x) => x.total !== 0);
+    if (!f.length) {
+      body = emptyState('法人資料暫時抓不到', 'wallet');
+    } else {
+      const top = [...f.slice(0, 6), ...f.slice(-6).filter((x) => !f.slice(0, 6).includes(x))];
+      const maxAbs = Math.max(...top.map((x) => Math.abs(x.total)));
+      // 每個產業附上「是誰在撐／是誰在拖」：買超產業列買超最多的個股，賣超產業列賣超最多的
+      const leaders = (x) => (x.total > 0 ? st?.bySector?.[x.name] : st?.sellBySector?.[x.name]) ?? [];
+      body = `<ul class="p-5 space-y-3">${top.map((x) => `
+        <li class="text-sm" title="外資 ${yi(x.foreign)}、投信 ${yi(x.trust)}、自營商 ${yi(x.dealer)}">
+          <div class="flex justify-between gap-2"><span>${esc(x.name)}${x.bothBuyDays >= Math.ceil(x.days / 2) ? ' <span class="text-[11px] text-up">外資投信同買 ' + x.bothBuyDays + ' 天</span>' : ''}</span>
+            <span class="num ${trendClass(x.total)}">${yi(x.total)}</span></div>
+          <div class="mt-1">${divergingBar(x.total, maxAbs)}</div>
+          ${leaders(x).length ? `<div class="mt-1 text-[11px] text-muted leading-snug">${x.total > 0 ? '主要買超' : '主要賣超'}：${
+            leaders(x).map((s) => `<button data-ta-open="${esc(s.code)}" class="hover:text-accent-ink hover:underline">${esc(s.name)} <span class="num">${yi(s.total)}</span></button>`).join('、')}</div>` : ''}
+        </li>`).join('')}</ul>`;
+    }
+  } else {
+    const list = (view === 'buy' ? st?.buys : st?.sells) ?? [];
+    const watching = new Set(profile.watchlist);
+    body = list.length === 0 ? emptyState('法人資料暫時抓不到', 'wallet') : `<ol class="divide-y divide-line-soft">${list.map((s, i) => `
+      <li class="px-5 py-2.5 flex items-start gap-3 text-sm">
+        <span class="w-5 shrink-0 text-right text-xs text-faint num pt-0.5">${i + 1}</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex justify-between gap-2">
+            <span class="truncate"><span class="font-medium">${esc(s.name)}</span> <span class="text-xs text-muted num">${esc(s.code)}</span></span>
+            <span class="num shrink-0 ${trendClass(s.total)}">${yi(s.total)}</span>
+          </div>
+          <div class="text-[11px] text-muted num mt-0.5 flex flex-wrap gap-x-2">
+            <span>${esc(s.sector)}</span>
+            <span>外資 ${lots(s.foreignLots * 1000)}</span>
+            <span>投信 ${lots(s.trustLots * 1000)}</span>
+            ${Math.abs(s.streak) >= 2 ? `<span class="${s.streak > 0 ? 'text-up' : 'text-down'}">連 ${Math.abs(s.streak)} 日${s.streak > 0 ? '買' : '賣'}</span>` : ''}
+          </div>
+        </div>
+        <div class="shrink-0 flex items-center">
+          ${watching.has(s.code)
+            ? '<span class="text-[11px] text-accent-ink px-1" title="已在自選">自選</span>'
+            : `<button data-add-watch="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="加入自選"><svg class="w-4 h-4 inline-block align-[-0.15em]" aria-hidden="true"><use href="#i-star"/></svg></button>`}
+          <button data-ta-open="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="技術分析"><svg class="w-4 h-4 inline-block align-[-0.15em]" aria-hidden="true"><use href="#i-chart-line"/></svg></button>
+        </div>
+      </li>`).join('')}</ol>`;
+  }
+
   return `<div class="min-w-0 lg:col-span-2 bg-surface rounded-xl border border-line">
     <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
       <h2 class="font-semibold">法人流向（${esc(r.flows.market)}）</h2>
-      <span class="text-xs text-muted">近 ${r.flows.days} 日三大法人合計</span>
+      <span class="text-xs text-muted num">${range ? `${range} · ` : ''}近 ${r.flows.days} 日三大法人合計</span>
+      <div class="w-full flex gap-1">${tabs}</div>
     </div>
-    <ul class="p-5 space-y-2.5">${top.map((x) => `
-      <li class="text-sm" title="外資 ${yi(x.foreign)}、投信 ${yi(x.trust)}、自營商 ${yi(x.dealer)}">
-        <div class="flex justify-between gap-2"><span>${esc(x.name)}${x.bothBuyDays >= Math.ceil(x.days / 2) ? ' <span class="text-[11px] text-up">外資投信同買 ' + x.bothBuyDays + ' 天</span>' : ''}</span>
-          <span class="num ${trendClass(x.total)}">${yi(x.total)}</span></div>
-        <div class="mt-1">${divergingBar(x.total, maxAbs)}</div>
-      </li>`).join('')}</ul>
+    ${body}
+    ${view !== 'sector' ? '<p class="px-5 pb-4 text-[11px] text-faint">金額為買賣超股數 × 最新收盤的近似值；不含 ETF。</p>' : ''}
   </div>`;
 }
 
@@ -1705,7 +1754,10 @@ function addToWatchlist(code) {
   if (!code || profile.watchlist.includes(code)) return;
   profile.watchlist.push(code);
   saveProfile();
+  notify(`已加入自選 ${code}`);
   refresh();
+  // 從產業雷達的法人排行加入時，列表上的「自選」標記要立刻更新
+  if ($('tab-radar').classList.contains('active') && radarLatest) renderRadar();
 }
 
 let searchTimer = null;
@@ -1717,7 +1769,7 @@ function initEvents() {
     </button>`).join('');
 
   document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open]');
+    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open], [data-flow-view]');
     if (!target) return;
 
     const d = target.dataset;
@@ -1725,6 +1777,12 @@ function initEvents() {
     if (d.tab) return switchTab(d.tab);
 
     if (d.addWatch) return addToWatchlist(d.addWatch);
+
+    if (d.flowView) {
+      profile.flowView = d.flowView;
+      saveLocal(); // 檢視方式是每台裝置各自的習慣，不同步
+      return renderRadar();
+    }
 
     if (d.taOpen) {
       profile.taCode = d.taOpen;

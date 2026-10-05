@@ -113,6 +113,12 @@ if (!radar.ok) {
     w();
     w(`- 買超：${flows.slice(0, 4).filter((f) => f.total > 0).map((f) => `${f.name} ${yi(f.total)}`).join('、') || '—'}`);
     w(`- 賣超：${flows.slice(-4).reverse().filter((f) => f.total < 0).map((f) => `${f.name} ${yi(f.total)}`).join('、') || '—'}`);
+    const st = radar.flows.stocks;
+    if (st?.buys?.length) {
+      const fmtStock = (x) => `${x.name}（${x.code}）${yi(x.total)}${Math.abs(x.streak) >= 2 ? `，連 ${Math.abs(x.streak)} 日${x.streak > 0 ? '買' : '賣'}` : ''}`;
+      w(`- 個股買超前 5：${st.buys.slice(0, 5).map(fmtStock).join('、')}`);
+      w(`- 個股賣超前 5：${st.sells.slice(0, 5).map(fmtStock).join('、')}`);
+    }
     w();
   }
 

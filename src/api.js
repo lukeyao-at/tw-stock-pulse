@@ -27,7 +27,7 @@ import * as finmind from './sources/finmind.js';
 import * as themeSource from './sources/themes.js';
 import { RADAR } from './config.js';
 import {
-  THEMES, rotation, sectorReturns, aggregateFlows, combineFlows, revenueMetrics, themeHeat, earlySignals, sectorKey,
+  THEMES, rotation, sectorReturns, aggregateFlows, combineFlows, stockFlows, revenueMetrics, themeHeat, earlySignals, sectorKey,
 } from './radar.js';
 import { OFFLINE } from './config.js';
 
@@ -338,6 +338,8 @@ export async function radar(body = {}) {
   let rot = null;
   let returns = {};
   let flows = [];
+  let flowStocks = null;
+  let flowDates = [];
   if (twseRes.status === 'fulfilled') {
     const t = twseRes.value;
     notes.push(...t.turnover.failures, ...t.index.failures, ...t.flows.failures);
@@ -351,6 +353,9 @@ export async function radar(body = {}) {
     const industryOf = new Map([...info].map(([code, r]) => [code, r.industry]));
     const priceOf = new Map(uni.stocks.map((s) => [s.code, s.close]));
     flows = combineFlows(t.flows.out.map((d) => ({ date: d.date, flows: aggregateFlows(d.value, industryOf, priceOf) })));
+    const nameOf = new Map(uni.stocks.map((x) => [x.code, x.name]));
+    flowStocks = stockFlows(t.flows.out.map((d) => ({ date: d.date, rows: d.value })), { industryOf, priceOf, nameOf });
+    flowDates = t.flows.out.map((d) => d.date);
     if (!info.size) notes.push('沒有產業分類資料，無法把法人買賣超歸到產業');
   } else {
     notes.push(`證交所資料：${twseRes.reason?.message || twseRes.reason}`);
@@ -397,7 +402,14 @@ export async function radar(body = {}) {
     updatedAt: new Date().toISOString(),
     rotation: rot,
     returns,
-    flows: { days: RADAR.flowDays, market: '上市', sectors: flows },
+    flows: {
+      days: flowDates.length || RADAR.flowDays,
+      from: flowDates[0] ?? null,
+      to: flowDates[flowDates.length - 1] ?? null,
+      market: '上市',
+      sectors: flows,
+      stocks: flowStocks,
+    },
     themes,
     watchlist: watch,
     signals: earlySignals({ rotation: rot, flows, themes, returns }),
