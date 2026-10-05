@@ -201,6 +201,40 @@ const SENTIMENT_STYLE = {
   中性: 'bg-raised text-muted border-line',
 };
 
+/**
+ * 操作結果與錯誤訊息。刻意不用 alert()：嵌入式預覽（例如 Claude 的 artifact
+ * 檢視器）會直接吞掉 alert／confirm，使用者只會覺得按鈕壞了。
+ */
+let toastTimer = null;
+function notify(message, kind = 'ok') {
+  const el = $('toast');
+  if (!el) return;
+  const styles = {
+    ok: 'bg-ink text-canvas',
+    error: 'bg-danger-bg text-danger border border-danger-line',
+  };
+  el.className = `fixed left-1/2 -translate-x-1/2 z-50 max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-lg shadow-lg text-sm ${styles[kind] || styles.ok}`;
+  el.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), kind === 'error' ? 5000 : 3000);
+}
+
+/** 欄位驗證失敗：提示並把游標帶到該欄 */
+function invalid(id, message) {
+  notify(message, 'error');
+  const field = $(id);
+  if (field) {
+    field.setAttribute('aria-invalid', 'true');
+    field.focus();
+  }
+}
+
+/** 空白欄位不能當成 0 —— Number('') 是 0，會讓「沒填」被當成有效的 0 */
+const numberFrom = (id) => {
+  const raw = $(id).value.trim();
+  return raw === '' ? NaN : Number(raw);
+};
+
 function emptyState(text, icon = 'inbox') {
   return `<div class="py-8 text-center text-faint text-sm">
     <svg class="w-7 h-7 mb-2 mx-auto block opacity-50" aria-hidden="true"><use href="#i-${icon}"/></svg>${esc(text)}</div>`;
@@ -1324,10 +1358,19 @@ function bindChartHover(c) {
   };
 
   wrap.querySelectorAll('.ta-hit').forEach((hit) => {
+    // 左右拖曳可以逐日看數值，上下滑仍然捲動頁面
+    hit.style.touchAction = 'pan-y';
     hit.addEventListener('pointermove', show);
     hit.addEventListener('pointerdown', show);
-    hit.addEventListener('pointerleave', hide);
+    // 觸控在手指離開時就會觸發 pointerleave，若照樣隱藏，tooltip 會一閃即逝；
+    // 觸控改成點圖以外的地方才收起
+    hit.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
   });
+  const outside = (e) => {
+    if (!document.body.contains(wrap)) return document.removeEventListener('pointerdown', outside);
+    if (!wrap.contains(e.target)) hide();
+  };
+  document.addEventListener('pointerdown', outside);
 }
 
 // ── 產業雷達 ─────────────────────────────────────────
@@ -1800,14 +1843,13 @@ function initEvents() {
 
   // ── 持股新增
   $('h-add').addEventListener('click', () => {
-    const code = $('h-code').value.trim();
-    const shares = Number($('h-shares').value);
-    const cost = Number($('h-cost').value);
+    const code = $('h-code').value.trim().toUpperCase();
+    const shares = numberFrom('h-shares');
+    const cost = numberFrom('h-cost');
 
-    if (!code || !(shares > 0) || !(cost >= 0)) {
-      alert('請填入代號、股數與每股成本');
-      return;
-    }
+    if (!code) return invalid('h-code', '請填入股票代號');
+    if (!(shares > 0)) return invalid('h-shares', '請填入股數（大於 0）');
+    if (!(cost > 0)) return invalid('h-cost', '請填入每股成本（大於 0）');
 
     const existing = profile.holdings.find((h) => h.code === code);
     if (existing) {
@@ -1823,6 +1865,7 @@ function initEvents() {
     saveProfile();
 
     $('h-code').value = $('h-shares').value = $('h-cost').value = '';
+    notify(existing ? `已加碼 ${code}，平均成本更新為 ${fmt(existing.cost)}` : `已新增持股 ${code}`);
     refresh();
   });
 
@@ -1833,10 +1876,10 @@ function initEvents() {
     const type = $('a-type').value;
     const meta = RULE_TYPES[type];
 
-    if (!code) { alert('請先加入自選股'); return; }
+    if (!code) return invalid('search', '請先在上方搜尋框加入自選股，才能設定提醒');
 
-    const value = meta.needsValue ? Number($('a-value').value) : null;
-    if (meta.needsValue && !Number.isFinite(value)) { alert(`請填入數值（${meta.unit}）`); return; }
+    const value = meta.needsValue ? numberFrom('a-value') : null;
+    if (meta.needsValue && !Number.isFinite(value)) return invalid('a-value', `請填入數值（${meta.unit}）`);
 
     profile.rules.push({
       id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
@@ -1844,13 +1887,15 @@ function initEvents() {
     });
     saveProfile();
     $('a-value').value = '';
+    notify(`已新增提醒：${code} ${meta.label}${meta.needsValue ? ` ${value}${meta.unit}` : ''}`);
     refresh();
   });
 
+  // 使用者開始修正欄位就拿掉錯誤標記
+  document.addEventListener('input', (e) => e.target.removeAttribute?.('aria-invalid'));
+
   // ── 設定
-  $('s-fees').checked = profile.includeFees;
-  $('s-discount').value = profile.feeDiscount;
-  $('s-interval').value = profile.refreshSeconds;
+  syncSettingsInputs();
 
   $('s-fees').addEventListener('change', (e) => {
     profile.includeFees = e.target.checked; saveProfile(); refresh();
@@ -1864,33 +1909,115 @@ function initEvents() {
     saveProfile(); scheduleRefresh();
   });
 
+  // 匯出／匯入：以文字面板為主（任何環境都能複製貼上），下載檔案只是附加選項
+  const exportText = () => JSON.stringify(profile, null, 2);
   $('export').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+    const panel = $('export-panel');
+    const opening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !opening);
+    if (opening) {
+      $('export-text').value = exportText();
+      $('export-text').select();
+    }
+  });
+  $('export-close').addEventListener('click', () => $('export-panel').classList.add('hidden'));
+
+  $('export-copy').addEventListener('click', async () => {
+    const text = $('export-text').value || exportText();
+    try {
+      await navigator.clipboard.writeText(text);
+      notify('已複製設定，貼到記事本或訊息裡保存即可');
+    } catch {
+      // 有些環境不給寫剪貼簿：選取文字，讓使用者自己按複製
+      $('export-text').focus();
+      $('export-text').select();
+      notify('無法自動複製，已幫你選取文字，請按「複製」（或 Ctrl／⌘+C）', 'error');
+    }
+  });
+
+  $('export-download').addEventListener('click', () => {
+    const blob = new Blob([exportText()], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `tw-stock-pulse-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    notify('已開始下載；若沒有出現檔案，代表這個環境不允許下載，請改用「複製」');
+  });
+
+  $('export-apply').addEventListener('click', () => {
+    try {
+      applyProfile(JSON.parse($('export-text').value), '已套用貼上的設定');
+    } catch (err) {
+      invalid('export-text', `套用失敗：${err.message}`);
+    }
   });
 
   $('import').addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = ''; // 同一個檔案再選一次也要觸發
     if (!file) return;
     try {
-      const incoming = JSON.parse(await file.text());
-      profile = { ...freshDefaults(), ...incoming };
-      saveProfile();
-      location.reload();
+      applyProfile(JSON.parse(await file.text()), `已匯入 ${file.name}`);
     } catch (err) {
-      alert(`匯入失敗：${err.message}`);
+      notify(`匯入失敗：${err.message}`, 'error');
     }
   });
 
+  // 清除全部：按兩次確認（不用 confirm()，嵌入式預覽會直接回傳「取消」）
+  let resetArmed = null;
   $('reset').addEventListener('click', () => {
-    if (!confirm('確定要清除所有自選股、持股與提醒規則嗎？此動作無法復原。')) return;
-    localStorage.removeItem(STORAGE_KEY);
-    location.reload();
+    if (!resetArmed) {
+      $('reset-label').textContent = '再按一次確認清除';
+      resetArmed = setTimeout(() => {
+        resetArmed = null;
+        $('reset-label').textContent = '清除全部';
+      }, 4000);
+      return;
+    }
+    clearTimeout(resetArmed);
+    resetArmed = null;
+    $('reset-label').textContent = '清除全部';
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* 無法存取儲存空間時照樣重設畫面 */ }
+    applyProfile(freshDefaults(), '已清除，回到預設的自選股清單');
   });
+}
+
+/** 把 profile 的值填回設定頁的輸入框（啟動、匯入、清除後都要同步） */
+function syncSettingsInputs() {
+  $('s-fees').checked = profile.includeFees;
+  $('s-discount').value = profile.feeDiscount;
+  $('s-interval').value = profile.refreshSeconds;
+}
+
+/**
+ * 套用一份新設定，不重新載入頁面：在無法使用 localStorage 的環境，
+ * 重新載入會把剛匯入的設定弄丟。
+ */
+function applyProfile(incoming, message) {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    throw new Error('內容不是設定格式（應該是 { "watchlist": [...], ... }）');
+  }
+  if (incoming.watchlist !== undefined && !Array.isArray(incoming.watchlist)) {
+    throw new Error('watchlist 必須是代號陣列');
+  }
+  profile = { ...freshDefaults(), ...incoming };
+  saveProfile();
+  syncSettingsInputs();
+  applyTheme(profile.theme);
+  scheduleRefresh();
+  taCache.clear();
+  taLatest = null;
+  radarLatest = null;
+  $('export-panel').classList.add('hidden');
+  notify(message);
+  refresh();
+  // 正在看的分頁要用新設定重畫
+  const active = document.querySelector('.tab-content.active')?.id?.replace('tab-', '');
+  if (active === 'technical') { profile.taCode = null; loadTechnical(); }
+  if (active === 'radar') loadRadar();
 }
 
 function scheduleRefresh() {

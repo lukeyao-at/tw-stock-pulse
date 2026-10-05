@@ -16,6 +16,7 @@ npm start                # http://localhost:8420
 npm run offline          # 用內建樣本資料跑，完全不連外
 npm test                 # 100 個單元測試
 npm run check-sources    # 逐一實測每個公開來源是否還活著
+npm run test:e2e         # 展示版端對端測試（模擬嵌入式預覽的限制，逐一操作每個按鈕；需 playwright）
 npm run report           # 每日盤後報告（產業雷達 + 持股／自選股通道訊號），存到 reports/
 ```
 

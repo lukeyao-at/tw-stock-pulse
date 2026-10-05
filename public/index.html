@@ -325,17 +325,29 @@
                             每次查詢時才隨請求送到本機伺服器計算。伺服器不寫入任何資料庫、不設 cookie、
                             不保留你的持股明細。
                         </p>
-                        <div class="flex gap-2 mt-4">
+                        <div class="flex flex-wrap gap-2 mt-4">
                             <button id="export" class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised">
-                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-download"/></svg>匯出設定
+                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-download"/></svg>匯出／匯入設定
                             </button>
                             <label class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised cursor-pointer">
-                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-upload"/></svg>匯入設定
-                                <input id="import" type="file" accept="application/json" class="hidden">
+                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-upload"/></svg>從檔案匯入
+                                <input id="import" type="file" accept="application/json,.json" class="hidden">
                             </label>
                             <button id="reset" class="px-3.5 py-2 text-sm rounded-lg border border-danger-line text-danger hover:bg-danger-bg">
-                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-trash"/></svg>清除全部
+                                <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-trash"/></svg><span id="reset-label">清除全部</span>
                             </button>
+                        </div>
+
+                        <!-- 匯出／匯入面板：用文字複製貼上，在不允許下載檔案的環境（例如嵌入式預覽）也能搬移設定 -->
+                        <div id="export-panel" class="hidden mt-4 pt-4 border-t border-line-soft">
+                            <label for="export-text" class="block text-xs text-muted mb-1.5">設定內容（JSON）：複製起來保存，或把之前存的內容貼進來按「套用」</label>
+                            <textarea id="export-text" rows="8" spellcheck="false" class="w-full px-3 py-2 text-xs rounded-lg border border-line bg-raised num font-mono"></textarea>
+                            <div class="flex flex-wrap gap-2 mt-2">
+                                <button id="export-copy" class="px-3 py-1.5 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 text-white">複製</button>
+                                <button id="export-apply" class="px-3 py-1.5 text-sm rounded-lg border border-line hover:bg-raised">套用貼上的內容</button>
+                                <button id="export-download" class="px-3 py-1.5 text-sm rounded-lg border border-line hover:bg-raised">下載成檔案</button>
+                                <button id="export-close" class="px-3 py-1.5 text-sm rounded-lg text-muted hover:bg-raised ml-auto">收起</button>
+                            </div>
                         </div>
                     </div>
 
@@ -370,6 +382,11 @@
         </div>
     </main>
 </div>
+
+<!-- 操作結果與錯誤訊息。不用 alert()：有些環境（嵌入式預覽）會直接吞掉對話框，使用者只會覺得按鈕沒反應 -->
+<div id="toast" role="status" aria-live="polite"
+     class="hidden fixed left-1/2 -translate-x-1/2 z-50 max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-lg shadow-lg text-sm"
+     style="bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))"></div>
 
 <script src="/app.js"></script>
 </body>

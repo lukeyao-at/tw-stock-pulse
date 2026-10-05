@@ -181,6 +181,12 @@
      手機上整頁跟著被推出螢幕。統一設 0，寬內容就只在自己的捲動容器裡捲。 */
   .grid > * { min-width: 0; }
 
+  /* 驗證失敗的欄位 */
+  [aria-invalid='true'] {
+    border-color: rgb(var(--c-danger));
+    box-shadow: 0 0 0 2px rgb(var(--c-danger-line));
+  }
+
   /* 數字欄位等寬，表格才不會跳動 */
   .num { font-variant-numeric: tabular-nums; }
 
