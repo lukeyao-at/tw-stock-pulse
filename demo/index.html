@@ -345,7 +345,6 @@
                             <div class="flex flex-wrap gap-2 mt-2">
                                 <button id="export-copy" class="px-3 py-1.5 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 text-white">複製</button>
                                 <button id="export-apply" class="px-3 py-1.5 text-sm rounded-lg border border-line hover:bg-raised">套用貼上的內容</button>
-                                <button id="export-download" class="px-3 py-1.5 text-sm rounded-lg border border-line hover:bg-raised">下載成檔案</button>
                                 <button id="export-close" class="px-3 py-1.5 text-sm rounded-lg text-muted hover:bg-raised ml-auto">收起</button>
                             </div>
                         </div>
@@ -4180,7 +4179,8 @@ function initEvents() {
     }
   });
 
-  $('export-download').addEventListener('click', () => {
+  // 展示版會拿掉這顆按鈕（嵌入式預覽不允許下載），所以要容許它不存在
+  $('export-download')?.addEventListener('click', () => {
     const blob = new Blob([exportText()], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

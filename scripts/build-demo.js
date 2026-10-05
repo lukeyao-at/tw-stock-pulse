@@ -248,6 +248,10 @@ html = html.replace(
   `<script>\n(function () {\n${modules}\n${glue}\n})();\n</script>\n<script>\n${demoAppJs()}\n</script>`,
 );
 
+// 展示版多半在嵌入式預覽裡開（不允許下載檔案），拿掉「下載成檔案」，只留複製／貼上
+html = html.replace(/\s*<button id="export-download"[^>]*>[^<]*<\/button>/, '');
+if (html.includes('id="export-download"')) throw new Error('沒能拿掉 export-download 按鈕');
+
 // 展示版的標題與說明
 html = html.replace('<title>台股脈動 — 個人化追蹤</title>', '<title>台股脈動 — 介面展示</title>');
 

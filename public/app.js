@@ -1935,7 +1935,8 @@ function initEvents() {
     }
   });
 
-  $('export-download').addEventListener('click', () => {
+  // 展示版會拿掉這顆按鈕（嵌入式預覽不允許下載），所以要容許它不存在
+  $('export-download')?.addEventListener('click', () => {
     const blob = new Blob([exportText()], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
