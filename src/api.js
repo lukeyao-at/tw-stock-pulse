@@ -1,9 +1,9 @@
 /**
  * API 層。
  *
- * 個人化資料（自選股、持股、提醒規則）一律由前端在請求裡帶上來，
+ * 個人化資料（自選股、提醒規則、偏好）一律由前端在請求裡帶上來，
  * 後端不保存任何使用者資料 —— 沒有帳號、沒有資料庫、沒有 cookie。
- * 這讓部署變得零狀態，也避免我們去保管別人的持股明細。
+ * 這讓部署變得零狀態，也不必保管任何人的個人資料。
  */
 
 import { readFile } from 'node:fs/promises';
@@ -15,7 +15,6 @@ import * as quotesSource from './sources/quotes.js';
 import * as newsSource from './sources/news.js';
 import * as twse from './sources/twse.js';
 import * as history from './sources/history.js';
-import * as portfolio from './portfolio.js';
 import * as alerts from './alerts.js';
 import * as cache from './cache.js';
 import { analyze, summarize } from './sentiment.js';
@@ -79,7 +78,7 @@ function sampleEvents(watchlist) {
 
 /**
  * 主要端點：一次算完整個畫面需要的資料。
- * @param {object} body { watchlist, holdings, rules, risk, goals, excludeIndustries, feeDiscount }
+ * @param {object} body { watchlist, rules, risk, goals, excludeIndustries }
  */
 export async function dashboard(body = {}) {
   const notes = [];
@@ -89,13 +88,7 @@ export async function dashboard(body = {}) {
   notes.push(...uni.notes);
 
   const watchlist = normalizeWatchlist(body.watchlist, uni.byCode);
-  const holdings = (body.holdings ?? []).filter((h) => h?.code);
-
-  // 持股也要有報價，所以一起送去查即時價
-  const quoteTargets = normalizeWatchlist(
-    [...watchlist.map((w) => w.code), ...holdings.map((h) => h.code)],
-    uni.byCode,
-  );
+  const quoteTargets = watchlist;
 
   const allNames = uni.stocks.map((s) => s.name).filter(Boolean);
 
@@ -169,15 +162,9 @@ export async function dashboard(body = {}) {
     };
   });
 
-  const positions = portfolio.evaluate(holdings, byCodeWithAvg, quoteByCode, {
-    feeDiscount: body.feeDiscount,
-    includeFees: body.includeFees !== false,
-  });
-
   const recommendations = recommend(uni.stocks, {
     risk: body.risk,
     goals: body.goals,
-    holdings,
     watchlist,
     excludeIndustries: body.excludeIndustries,
     limit: body.recommendLimit ?? 8,
@@ -191,8 +178,8 @@ export async function dashboard(body = {}) {
     now: new Date().toISOString(),
   });
 
-  // 自選股與持股的近期事件（30 天內），給行事曆區塊用
-  const watchCodes = new Set([...watchlist.map((w) => w.code), ...holdings.map((h) => h.code)]);
+  // 自選股的近期事件（30 天內），給行事曆區塊用
+  const watchCodes = new Set(watchlist.map((w) => w.code));
   const upcoming = (eventData.events ?? [])
     .filter((e) => watchCodes.has(e.code))
     .filter((e) => {
@@ -205,7 +192,6 @@ export async function dashboard(body = {}) {
   return {
     updatedAt: new Date().toISOString(),
     watchlist: watchRows,
-    portfolio: positions,
     news: {
       personalized: personalized.slice(0, 40),
       others: others.slice(0, 20),

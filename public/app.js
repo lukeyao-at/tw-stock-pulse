@@ -11,8 +11,7 @@ const STORAGE_KEY = 'tw-stock-pulse/profile/v1';
 
 /**
  * 預設自選股（與 data/watchlist.json 同步，那份給每日報告用）：依使用者券商 App 的分組排列（持股放最前面，技術分析分頁
- * 預設就會先打開第一檔）。持股的股數與成本要在「持股損益」分頁自己輸入
- * —— 這裡不放假數字，否則損益會算出看起來正常的錯誤結果。
+ * 預設就會先打開第一檔）。這是策略分析工具，不記錄股數、成本或損益。
  */
 const DEFAULT_WATCHLIST = [
   // 目前持股
@@ -30,12 +29,9 @@ const LEGACY_DEFAULT_WATCHLIST = ['2330', '2317', '2454', '2881', '2603'];
 
 const DEFAULT_PROFILE = {
   watchlist: DEFAULT_WATCHLIST,
-  holdings: [],
   rules: [],
   risk: 'balanced',
   goals: ['dividend'],
-  includeFees: true,
-  feeDiscount: 0.6,
   refreshSeconds: 60,
   newsFilter: 'all',
   theme: 'system',
@@ -82,7 +78,6 @@ const RULE_TYPES = {
 
 const TABS = [
   ['overview', '總覽', 'gauge'],
-  ['holdings', '持股損益', 'wallet'],
   ['technical', '技術分析', 'chart-line'],
   ['radar', '產業雷達', 'fire'],
   ['news', '個人化新聞', 'newspaper'],
@@ -99,7 +94,7 @@ const FACTOR_LABELS = {
 // ── 狀態 ─────────────────────────────────────────────
 
 /** 每次都給新的陣列：直接展開 DEFAULT_PROFILE 會共用陣列，push 自選股時會改到預設值本身 */
-const freshDefaults = () => ({ ...DEFAULT_PROFILE, watchlist: [...DEFAULT_WATCHLIST], holdings: [], rules: [], goals: [...DEFAULT_PROFILE.goals] });
+const freshDefaults = () => ({ ...DEFAULT_PROFILE, watchlist: [...DEFAULT_WATCHLIST], rules: [], goals: [...DEFAULT_PROFILE.goals] });
 
 function loadProfile() {
   try {
@@ -253,12 +248,9 @@ async function refresh() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         watchlist: profile.watchlist,
-        holdings: profile.holdings,
         rules: profile.rules,
         risk: profile.risk,
         goals: profile.goals,
-        includeFees: profile.includeFees,
-        feeDiscount: profile.feeDiscount,
       }),
     });
     if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
@@ -309,7 +301,6 @@ function renderAll() {
       : '<span class="text-emerald-400">資料正常</span>';
 
   renderOverview();
-  renderHoldings();
   renderNews();
   renderRecommend();
   renderAlerts();
@@ -319,16 +310,26 @@ function renderAll() {
 }
 
 function renderOverview() {
-  const { portfolio: pf, alerts, events, market, news } = latest;
+  const { alerts, events, market, news } = latest;
+  const rows = latest.watchlist.filter((w) => typeof w.changePercent === 'number');
+  const up = rows.filter((w) => w.changePercent > 0).length;
+  const down = rows.filter((w) => w.changePercent < 0).length;
+  const avgChange = rows.length ? rows.reduce((a, w) => a + w.changePercent, 0) / rows.length : null;
 
   const cards = [
-    { label: '持股市值', value: fmtMoney(pf.summary.totalValue), sub: `${pf.summary.positionCount} 檔`, icon: 'wallet' },
     {
-      label: '未實現損益',
-      value: fmtMoney(pf.summary.totalProfit),
-      sub: pf.summary.totalProfitPercent !== null ? `${signed(pf.summary.totalProfitPercent)}%` : '—',
+      label: '自選股今日',
+      value: `${up} 漲 / ${down} 跌`,
+      sub: avgChange === null ? '—' : `平均 ${signed(avgChange)}%`,
+      icon: 'star',
+      trend: avgChange,
+    },
+    {
+      label: '全市場漲跌家數',
+      value: `${fmtInt(market.gainers)} / ${fmtInt(market.losers)}`,
+      sub: market.total ? `上漲占 ${fmt((market.gainers / market.total) * 100, 0)}%` : '—',
       icon: 'trend-up',
-      trend: pf.summary.totalProfit,
+      trend: market.gainers - market.losers,
     },
     { label: '觸發中的提醒', value: fmtInt(alerts.triggered.length), sub: `共 ${profile.rules.length} 條規則`, icon: 'bell' },
     { label: '自選股新聞氛圍', value: news.mood.mood, sub: `利多 ${news.mood.counts.利多} / 利空 ${news.mood.counts.利空}`, icon: 'newspaper' },
@@ -457,84 +458,6 @@ function alertRow(a) {
   </div>`;
 }
 
-function renderHoldings() {
-  const pf = latest.portfolio;
-
-  $('portfolio-kpi').innerHTML = [
-    ['投入成本', fmtMoney(pf.summary.totalCost), null],
-    ['目前市值', fmtMoney(pf.summary.totalValue), null],
-    ['未實現損益', fmtMoney(pf.summary.totalProfit), pf.summary.totalProfit],
-    ['報酬率', pf.summary.totalProfitPercent !== null ? `${signed(pf.summary.totalProfitPercent)}%` : '—', pf.summary.totalProfit],
-  ].map(([label, value, trend]) => `
-    <div class="bg-surface rounded-xl border border-line p-4">
-      <div class="text-xs text-muted">${esc(label)}</div>
-      <div class="mt-1.5 text-xl font-semibold num ${trend !== null ? trendClass(trend) : ''}">${esc(value)}</div>
-    </div>`).join('');
-
-  $('fee-note').textContent = pf.feeNote;
-
-  $('holdings-table').innerHTML = pf.positions.length === 0
-    ? emptyState('還沒有持股，用上方欄位新增', 'wallet')
-    : `<table class="w-full text-sm">
-        <thead class="bg-raised text-muted text-xs">
-          <tr>
-            <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股數</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">成本</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">現價</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">市值</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">損益</th>
-            <th class="px-3 py-2.5"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line-soft">
-          ${pf.positions.map((p) => `
-            <tr class="hover:bg-raised ${p.unknown ? 'opacity-60' : ''}">
-              <td class="px-5 py-3">
-                <div class="font-medium">${esc(p.name)}</div>
-                <div class="text-xs text-muted num">${esc(p.code)}
-                  ${p.unknown ? '<span class="ml-1 text-warn">查無此代號</span>'
-                              : p.priceSource ? `<span class="ml-1 text-faint">${esc(p.priceSource)}</span>` : ''}
-                </div>
-              </td>
-              <td class="px-3 py-3 text-right num">${fmtInt(p.shares)}</td>
-              <td class="px-3 py-3 text-right num">${fmt(p.cost)}</td>
-              <td class="px-3 py-3 text-right num">${fmt(p.price)}</td>
-              <td class="px-3 py-3 text-right num">${fmtMoney(p.marketValue)}</td>
-              <td class="px-3 py-3 text-right num ${trendClass(p.profit)}">
-                ${fmtMoney(p.profit)}
-                <div class="text-xs">${p.profitPercent !== null ? signed(p.profitPercent) + '%' : ''}</div>
-              </td>
-              <td class="px-3 py-3 text-right">
-                <button data-remove-holding="${esc(p.code)}" class="text-faint hover:text-danger px-1" title="移除">
-                  <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
-                </button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
-
-  const conc = pf.concentration;
-  $('concentration').innerHTML = conc.length === 0
-    ? emptyState('尚無持股資料', 'chart-pie')
-    : conc.map((c) => `
-        <div>
-          <div class="flex justify-between text-sm mb-1">
-            <span>${esc(c.industry)}</span>
-            <span class="num ${c.percent > 40 ? 'text-warn font-medium' : 'text-sub'}">${fmt(c.percent, 1)}%</span>
-          </div>
-          <div class="h-2 bg-track rounded-full overflow-hidden">
-            <div class="h-full ${c.percent > 40 ? 'bg-warn-strong' : 'bg-brand-500'}" style="width:${Math.min(100, c.percent)}%"></div>
-          </div>
-        </div>`).join('')
-      + (pf.topConcentration && pf.topConcentration.percent > 40
-        ? `<p class="text-xs text-warn bg-warn-bg border border-warn-line rounded-lg px-3 py-2 mt-3">
-             <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-warning"/></svg>
-             ${esc(pf.topConcentration.industry)}占比 ${fmt(pf.topConcentration.percent, 1)}%，產業集中度偏高。
-             「推薦標的」分頁會優先推你尚未持有的產業。</p>`
-        : '');
-}
-
 function renderNews() {
   const { personalized, others, mood } = latest.news;
 
@@ -661,14 +584,12 @@ function renderRecommend() {
         </div>`).join('');
 
   $('recommend-disclaimer').innerHTML = `<svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-info"/></svg>${esc(r.disclaimer)}
-    　候選池 ${r.candidateCount} 檔（已排除已持有、已在自選、成交量過低者）。`;
+    　候選池 ${r.candidateCount} 檔（已排除已在自選、成交量過低者）。`;
 }
 
 function renderAlerts() {
   const watch = latest.watchlist;
-  const holdingCodes = latest.portfolio.positions.map((p) => ({ code: p.code, name: p.name }));
-  const options = [...watch, ...holdingCodes]
-    .filter((s, i, arr) => arr.findIndex((x) => x.code === s.code) === i);
+  const options = watch;
 
   const prevCode = $('a-code').value;
   $('a-code').innerHTML = options.length === 0
@@ -757,13 +678,10 @@ const taCache = new Map();
 let taLatest = null;
 let taLoading = null;
 
-/** 可選的標的：自選股 + 持股（去重） */
+/** 可選的標的：自選股（dashboard 還沒回來時先用代號） */
 function taOptions() {
-  const rows = [
-    ...(latest?.watchlist ?? []).map((s) => ({ code: s.code, name: s.name })),
-    ...(latest?.portfolio?.positions ?? []).map((p) => ({ code: p.code, name: p.name })),
-  ];
-  const fallback = [...profile.watchlist, ...profile.holdings.map((h) => h.code)].map((code) => ({ code, name: code }));
+  const rows = (latest?.watchlist ?? []).map((s) => ({ code: s.code, name: s.name }));
+  const fallback = profile.watchlist.map((code) => ({ code, name: code }));
   return [...rows, ...fallback].filter((s, i, arr) => arr.findIndex((x) => x.code === s.code) === i);
 }
 
@@ -1676,7 +1594,7 @@ function initEvents() {
     </button>`).join('');
 
   document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-remove-holding], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open]');
+    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open]');
     if (!target) return;
 
     const d = target.dataset;
@@ -1705,12 +1623,6 @@ function initEvents() {
 
     if (d.removeWatch) {
       profile.watchlist = profile.watchlist.filter((c) => c !== d.removeWatch);
-      saveProfile();
-      return refresh();
-    }
-
-    if (d.removeHolding) {
-      profile.holdings = profile.holdings.filter((h) => h.code !== d.removeHolding);
       saveProfile();
       return refresh();
     }
@@ -1841,34 +1753,6 @@ function initEvents() {
 
   $('search').addEventListener('blur', () => setTimeout(() => $('search-results').classList.add('hidden'), 150));
 
-  // ── 持股新增
-  $('h-add').addEventListener('click', () => {
-    const code = $('h-code').value.trim().toUpperCase();
-    const shares = numberFrom('h-shares');
-    const cost = numberFrom('h-cost');
-
-    if (!code) return invalid('h-code', '請填入股票代號');
-    if (!(shares > 0)) return invalid('h-shares', '請填入股數（大於 0）');
-    if (!(cost > 0)) return invalid('h-cost', '請填入每股成本（大於 0）');
-
-    const existing = profile.holdings.find((h) => h.code === code);
-    if (existing) {
-      // 同一檔再買進：改成加權平均成本，而不是覆蓋
-      const totalShares = existing.shares + shares;
-      existing.cost = +(((existing.cost * existing.shares) + (cost * shares)) / totalShares).toFixed(4);
-      existing.shares = totalShares;
-    } else {
-      profile.holdings.push({ code, shares, cost });
-    }
-
-    if (!profile.watchlist.includes(code)) profile.watchlist.push(code);
-    saveProfile();
-
-    $('h-code').value = $('h-shares').value = $('h-cost').value = '';
-    notify(existing ? `已加碼 ${code}，平均成本更新為 ${fmt(existing.cost)}` : `已新增持股 ${code}`);
-    refresh();
-  });
-
   // ── 提醒新增
   $('a-type').addEventListener('change', syncRuleValueField);
   $('a-add').addEventListener('click', () => {
@@ -1897,13 +1781,6 @@ function initEvents() {
   // ── 設定
   syncSettingsInputs();
 
-  $('s-fees').addEventListener('change', (e) => {
-    profile.includeFees = e.target.checked; saveProfile(); refresh();
-  });
-  $('s-discount').addEventListener('change', (e) => {
-    profile.feeDiscount = Math.max(0.1, Math.min(1, Number(e.target.value) || 0.6));
-    e.target.value = profile.feeDiscount; saveProfile(); refresh();
-  });
   $('s-interval').addEventListener('change', (e) => {
     profile.refreshSeconds = Math.max(0, Number(e.target.value) || 0);
     saveProfile(); scheduleRefresh();
@@ -1988,8 +1865,6 @@ function initEvents() {
 
 /** 把 profile 的值填回設定頁的輸入框（啟動、匯入、清除後都要同步） */
 function syncSettingsInputs() {
-  $('s-fees').checked = profile.includeFees;
-  $('s-discount').value = profile.feeDiscount;
   $('s-interval').value = profile.refreshSeconds;
 }
 

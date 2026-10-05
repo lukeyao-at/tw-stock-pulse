@@ -2,7 +2,7 @@
 /**
  * 產生 demo/index.html —— 單一自包含檔案，不需要伺服器就能開。
  *
- * 重點是「同一份程式碼」：計分引擎、情緒判讀、新聞比對、損益計算、技術分析全部
+ * 重點是「同一份程式碼」：計分引擎、情緒判讀、新聞比對、技術分析全部
  * 從 src/ 直接取用，前端 public/app.js 也是原封不動內嵌，只用一層
  * fetch 攔截把 /api/* 換成瀏覽器端的本地運算。所以 demo 看到的行為
  * 和真的跑 npm start 一致，只有資料是 data/ 底下的樣本。
@@ -30,8 +30,7 @@ function exportedNames(src) {
 
 /**
  * 把一個模組包成 IIFE，回傳它的匯出。
- * 必須逐一包起來，因為 portfolio.js 和 alerts.js 都匯出 evaluate，
- * 全部攤平會撞名。
+ * 必須逐一包起來，否則各模組的同名函式攤平後會撞名。
  */
 function wrapModule(alias, src) {
   const body = stripImports(src).replace(/^export\s+/gm, '');
@@ -51,7 +50,6 @@ const modules = [
   wrapModule('Sentiment', read('src/sentiment.js')),
   wrapModule('Match', read('src/match.js')),
   wrapModule('Recommend', read('src/recommend.js')),
-  wrapModule('Portfolio', read('src/portfolio.js')),
   wrapModule('Alerts', read('src/alerts.js')),
   wrapModule('Technical', read('src/technical.js')),
   wrapModule('SampleBars', read('src/sample-bars.js')),
@@ -117,7 +115,6 @@ function buildDashboard(body) {
     const stock = BY_CODE.get(code);
     watchlist.push({ code, name: stock?.name || code, market: stock?.market || '上市' });
   }
-  const holdings = (body.holdings ?? []).filter((h) => h?.code);
 
   const decorated = NEWS.map((item) => ({
     ...item,
@@ -141,12 +138,8 @@ function buildDashboard(body) {
     };
   });
 
-  const portfolio = Portfolio.evaluate(holdings, BY_CODE, new Map(), {
-    feeDiscount: body.feeDiscount, includeFees: body.includeFees !== false,
-  });
-
   const recommendations = Recommend.recommend(STOCKS, {
-    risk: body.risk, goals: body.goals, holdings, watchlist,
+    risk: body.risk, goals: body.goals, watchlist,
     excludeIndustries: body.excludeIndustries, limit: body.recommendLimit ?? 8,
   });
 
@@ -155,13 +148,12 @@ function buildDashboard(body) {
     now: new Date().toISOString(),
   });
 
-  const watchCodes = new Set([...watchlist.map((w) => w.code), ...holdings.map((h) => h.code)]);
+  const watchCodes = new Set(watchlist.map((w) => w.code));
   const upcoming = events.filter((e) => watchCodes.has(e.code)).sort((a, b) => a.date.localeCompare(b.date));
 
   return {
     updatedAt: new Date().toISOString(),
     watchlist: watchRows,
-    portfolio,
     news: {
       personalized: personalized.slice(0, 40),
       others: others.slice(0, 20),

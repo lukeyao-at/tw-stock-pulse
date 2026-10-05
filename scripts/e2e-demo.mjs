@@ -53,7 +53,7 @@ const visibleText = (p, sel) => p.$eval(sel, (e) => e.innerText).catch(() => '')
 const p = await fresh();
 
 // 導覽
-for (const t of ['overview', 'holdings', 'technical', 'radar', 'news', 'recommend', 'alerts', 'settings']) {
+for (const t of ['overview', 'technical', 'radar', 'news', 'recommend', 'alerts', 'settings']) {
   await tab(p, t);
   check(`分頁：${t}`, await p.$eval(`#tab-${t}`, (e) => e.classList.contains('active')));
 }
@@ -104,20 +104,10 @@ check('產業雷達載入', (await visibleText(p, '#radar-body')).includes('早�
 await p.click('#radar-refresh'); await p.waitForTimeout(800);
 check('產業雷達重新整理', (await visibleText(p, '#radar-body')).includes('早期訊號'));
 
-// 持股
-await tab(p, 'holdings');
-await p.click('#h-add'); await p.waitForTimeout(300);
-const d1 = await p.evaluate(() => window.__dialogs.length);
-const holdErr = (await p.isVisible('#toast')) ? await visibleText(p, '#toast') : '';
-check('持股：漏填時看得到提示', /請填入/.test(holdErr), d1 ? '只呼叫了 alert（檢視器看不到）' : holdErr);
-await p.fill('#h-code', '2330'); await p.fill('#h-shares', '1000'); await p.fill('#h-cost', '');
-await p.click('#h-add'); await p.waitForTimeout(300);
-check('持股：成本空白不會被當成 0', (await p.$$eval('#holdings-table tbody tr', (r) => r.length).catch(() => 0)) === 0 && /成本/.test(await visibleText(p, '#toast')));
-await p.fill('#h-code', '2330'); await p.fill('#h-shares', '1000'); await p.fill('#h-cost', '1000');
-await p.click('#h-add'); await p.waitForTimeout(500);
-check('持股：新增', (await p.$$eval('#holdings-table tbody tr', (r) => r.length)) === 1);
-await p.click('#holdings-table [data-remove-holding]'); await p.waitForTimeout(400);
-check('持股：移除', (await p.$$eval('#holdings-table tbody tr', (r) => r.length).catch(() => 0)) === 0);
+// 策略分析工具不該出現任何損益欄位
+check('沒有持股損益分頁', !(await p.$('#tab-holdings')) && !(await p.$('[data-tab=holdings]')));
+check('總覽沒有損益數字', !/損益|持股市值/.test(await visibleText(p, '#kpi-cards')), await visibleText(p, '#kpi-cards'));
+check('設定沒有手續費選項', !(await p.$('#s-fees')) && !(await p.$('#s-discount')));
 
 // 推薦
 await tab(p, 'recommend');
@@ -157,10 +147,6 @@ check('提醒：刪除', (await p.evaluate(() => profile.rules.length)) === 0);
 
 // 設定
 await tab(p, 'settings');
-await p.click('#s-fees'); await p.waitForTimeout(300);
-check('設定：手續費開關', await p.evaluate(() => profile.includeFees === false));
-await p.fill('#s-discount', '0.3'); await p.dispatchEvent('#s-discount', 'change');
-check('設定：折扣', await p.evaluate(() => profile.feeDiscount === 0.3));
 await p.fill('#s-interval', '0'); await p.dispatchEvent('#s-interval', 'change');
 check('設定：更新間隔', await p.evaluate(() => profile.refreshSeconds === 0));
 const dl0 = await p.evaluate(() => window.__downloads);

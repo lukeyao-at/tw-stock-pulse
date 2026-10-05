@@ -136,44 +136,6 @@
                 <div class="grid lg:grid-cols-3 gap-6 mt-6" id="market-movers"></div>
             </section>
 
-            <!-- ═══ 持股 ═══ -->
-            <section id="tab-holdings" class="tab-content">
-                <div class="flex flex-wrap items-end gap-3 mb-5">
-                    <div>
-                        <label class="block text-xs text-muted mb-1">代號</label>
-                        <input id="h-code" class="w-28 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="2330">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-muted mb-1">股數</label>
-                        <input id="h-shares" type="number" min="1" class="w-28 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="1000">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-muted mb-1">每股成本</label>
-                        <input id="h-cost" type="number" min="0" step="0.01" class="w-32 px-3 py-2 text-sm rounded-lg border border-line num" placeholder="950">
-                    </div>
-                    <button id="h-add" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">
-                        <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1" aria-hidden="true"><use href="#i-plus"/></svg>新增持股
-                    </button>
-                </div>
-
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="portfolio-kpi"></div>
-
-                <div class="bg-surface rounded-xl border border-line">
-                    <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                        <h2 class="font-semibold whitespace-nowrap">持股明細</h2>
-                        <span class="text-xs text-muted" id="fee-note"></span>
-                    </div>
-                    <div class="overflow-x-auto"><div id="holdings-table"></div></div>
-                </div>
-
-                <div class="bg-surface rounded-xl border border-line mt-6">
-                    <div class="px-5 py-3.5 border-b border-line-soft">
-                        <h2 class="font-semibold">產業集中度</h2>
-                    </div>
-                    <div id="concentration" class="p-5 space-y-3"></div>
-                </div>
-            </section>
-
             <!-- ═══ 產業雷達 ═══ -->
             <section id="tab-radar" class="tab-content">
                 <div class="flex flex-wrap items-center gap-3 mb-5">
@@ -213,7 +175,7 @@
                 <div class="bg-surface rounded-xl border border-line p-5 mb-6">
                     <div class="flex flex-wrap items-end gap-x-6 gap-y-4">
                         <div class="min-w-0 flex-1 basis-full lg:basis-0">
-                            <label class="block text-xs text-muted mb-2">標的（自選股與持股）</label>
+                            <label class="block text-xs text-muted mb-2">標的（自選股）</label>
                             <div id="ta-picker" class="flex flex-wrap gap-1.5"></div>
                         </div>
                         <div>
@@ -321,9 +283,9 @@
                     <div class="bg-surface rounded-xl border border-line p-5">
                         <h2 class="font-semibold mb-1">你的資料存在哪裡</h2>
                         <p class="text-sm text-sub leading-relaxed">
-                            自選股、持股與提醒規則全部存在<strong>這台瀏覽器的 localStorage</strong>，
+                            自選股、提醒規則與偏好全部存在<strong>這台瀏覽器的 localStorage</strong>，
                             每次查詢時才隨請求送到本機伺服器計算。伺服器不寫入任何資料庫、不設 cookie、
-                            不保留你的持股明細。
+                            不保留你的任何個人資料。
                         </p>
                         <div class="flex flex-wrap gap-2 mt-4">
                             <button id="export" class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised">
@@ -352,15 +314,7 @@
                     </div>
 
                     <div class="bg-surface rounded-xl border border-line p-5">
-                        <h2 class="font-semibold mb-4">計算參數</h2>
-                        <label class="flex items-center justify-between py-2">
-                            <span class="text-sm">損益計入手續費與證交稅</span>
-                            <input id="s-fees" type="checkbox" class="w-4 h-4 accent-brand-600">
-                        </label>
-                        <label class="flex items-center justify-between py-2">
-                            <span class="text-sm">手續費折扣（0.6 = 六折）</span>
-                            <input id="s-discount" type="number" min="0.1" max="1" step="0.05" class="w-24 px-2 py-1.5 text-sm rounded border border-line num">
-                        </label>
+                        <h2 class="font-semibold mb-4">更新</h2>
                         <label class="flex items-center justify-between py-2">
                             <span class="text-sm">自動更新間隔（秒，0 = 關閉）</span>
                             <input id="s-interval" type="number" min="0" step="10" class="w-24 px-2 py-1.5 text-sm rounded border border-line num">
