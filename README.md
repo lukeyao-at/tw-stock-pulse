@@ -18,6 +18,7 @@ npm run offline          # 用內建樣本資料跑，完全不連外
 npm test                 # 92 個單元測試
 npm run check-sources    # 逐一實測每個公開來源是否還活著
 npm run test:e2e         # 展示版端對端測試（模擬嵌入式預覽的限制，逐一操作每個按鈕；需 playwright）
+npm run build:snapshot   # 盤後快照：真實資料打包成單一頁面（snapshot/index.html），發布後任何裝置都能看
 npm run report           # 每日盤後報告（產業雷達 + 持股／自選股通道訊號），存到 reports/
 ```
 
@@ -109,6 +110,18 @@ npm run build:css        # 或 npm run watch:css 開發時持續重建
 - 證交所的 WAF 對密集請求很敏感：請求依序送出、間隔 2.5 秒，遇到限流（307）等 20 秒重試一次，
   再被擋就 10 分鐘內不再送出，只用快取。過去交易日寫進 `data/cache/`（已 gitignore），永遠只抓一次，
   所以第一次約 1 分鐘，之後幾秒
+
+### 盤後快照（任何裝置都能看）
+`npm run build:snapshot` 把收盤後的真實資料——全市場行情、自選股兩年日 K、產業雷達、新聞——
+打包成 `snapshot/index.html` 一個檔案（約 1.6 MB），發布成 Claude artifact 後，手機、電腦登入
+同一個帳號就能看。技術分析在瀏覽器裡用同一套引擎即時計算，只是日 K 是打包時的版本。
+
+- 每個交易日 16:30 的盤後排程會重建並發布到同一個網址
+- 自選股、提醒規則與偏好存在頁面的雲端資料庫（artifact 的 db 能力），各裝置共用；
+  排程更新時也從那裡讀清單，所以手機上新加的股票，下一次更新就有日 K 與分析
+- 主題、目前看哪一檔是每台裝置各自的設定，不同步
+- 資料抓不到時（股票宇宙退回樣本、過半自選股沒有日 K）寧可失敗也不發布
+- 組頁邏輯在 `scripts/page-builder.js`，展示版（`build:demo`）與快照共用
 
 ### 每日盤後報告
 `npm run report` 產生 Markdown 報告（存到 `reports/`，已 gitignore）：大盤、產業雷達的早期訊號、

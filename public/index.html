@@ -58,7 +58,8 @@
                 </span>
                 <div>
                     <div class="text-white font-semibold leading-tight">台股脈動</div>
-                    <div class="text-[11px] text-slate-400">個人化追蹤</div>
+                    <div class="text-[11px] text-slate-400">策略分析</div>
+                    <div id="sync-badge" class="text-[11px] text-slate-500"></div>
                 </div>
             </div>
         </div>
@@ -282,10 +283,10 @@
                 <div class="max-w-2xl space-y-6">
                     <div class="bg-surface rounded-xl border border-line p-5">
                         <h2 class="font-semibold mb-1">你的資料存在哪裡</h2>
-                        <p class="text-sm text-sub leading-relaxed">
-                            自選股、提醒規則與偏好全部存在<strong>這台瀏覽器的 localStorage</strong>，
-                            每次查詢時才隨請求送到本機伺服器計算。伺服器不寫入任何資料庫、不設 cookie、
-                            不保留你的任何個人資料。
+                        <p id="sync-status" class="text-sm text-ink leading-relaxed">自選股與提醒只存在這台瀏覽器，換裝置不會跟著走。</p>
+                        <p class="text-xs text-muted leading-relaxed mt-2">
+                            這是策略分析工具，只存自選股、提醒規則與偏好，不記錄股數、成本或損益。
+                            自己用 npm start 跑時，資料存在這台瀏覽器的 localStorage，伺服器不寫資料庫、不設 cookie。
                         </p>
                         <div class="flex flex-wrap gap-2 mt-4">
                             <button id="export" class="px-3.5 py-2 text-sm rounded-lg border border-line hover:bg-raised">

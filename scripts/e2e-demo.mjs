@@ -67,7 +67,7 @@ check('主題切換', th0 !== th1, `${th0} → ${th1}`);
 
 // 更新
 await p.click('#refresh'); await p.waitForTimeout(300);
-check('更新按鈕', (await visibleText(p, '#updated')).includes('更新於'));
+check('更新按鈕', /更新於|資料至/.test(await visibleText(p, '#updated')));
 
 // 搜尋加入
 const n0 = await watchCount(p);

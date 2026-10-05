@@ -4,6 +4,7 @@
  *
  *   npm run report                 # 印到畫面，並存到 reports/YYYY-MM-DD.md
  *   npm run report -- --stdout     # 只印不存
+ *   npm run report -- --watchlist-file profile.json   # 用頁面同步到雲端的自選股
  *
  * 清單來自 data/watchlist.json。報告只列「有事的」標的（碰到通道邊緣、突破、
  * 跌破、營收轉折），沒事的不佔版面 —— 每天要看的是變化，不是全部。
@@ -23,7 +24,25 @@ import { parseYahooChart } from '../src/sources/history.js';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const list = JSON.parse(readFileSync(path.join(ROOT, 'data/watchlist.json'), 'utf8'));
 const holdings = list.holdings;
-const groups = list.groups;
+const groups = { ...list.groups };
+
+// --watchlist-file：頁面同步到雲端的自選股（{ "watchlist": [...] }）。
+// 使用者在手機或電腦上新加的、不在原本分組裡的，歸到「其他自選」；刪掉的就不再列出。
+const fileArg = process.argv.indexOf('--watchlist-file');
+if (fileArg !== -1) {
+  try {
+    const synced = JSON.parse(readFileSync(process.argv[fileArg + 1], 'utf8')).watchlist;
+    if (Array.isArray(synced) && synced.length) {
+      const keep = new Set(synced.map((c) => String(c).toUpperCase()));
+      for (const g of Object.keys(groups)) groups[g] = groups[g].filter((c) => keep.has(c));
+      const grouped = new Set([...holdings, ...Object.values(groups).flat()]);
+      const extra = [...keep].filter((c) => !grouped.has(c));
+      if (extra.length) groups['其他自選'] = extra;
+    }
+  } catch (err) {
+    console.error(`⚠ 讀不到 ${process.argv[fileArg + 1]}（${err.message}），改用 data/watchlist.json`);
+  }
+}
 const allCodes = [...new Set([...holdings, ...Object.values(groups).flat()])];
 
 const pct = (n, d = 1) => (typeof n === 'number' ? `${n > 0 ? '+' : ''}${n.toFixed(d)}%` : '—');

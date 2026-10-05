@@ -17,7 +17,8 @@
     "check-sources": "NODE_OPTIONS=--use-env-proxy node scripts/check-sources.js",
     "build:demo": "node scripts/build-demo.js",
     "report": "NODE_OPTIONS=--use-env-proxy node scripts/daily-report.js",
-    "test:e2e": "node scripts/e2e-demo.mjs"
+    "test:e2e": "node scripts/e2e-demo.mjs",
+    "build:snapshot": "NODE_OPTIONS=--use-env-proxy node scripts/build-snapshot.js"
   },
   "keywords": [
     "台股",

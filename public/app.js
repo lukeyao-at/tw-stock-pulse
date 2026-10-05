@@ -117,11 +117,127 @@ let latest = null;
 let refreshTimer = null;
 let inFlight = false;
 
-function saveProfile() {
+function saveLocal() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
   } catch (err) {
     console.warn('無法寫入 localStorage：', err.message);
+  }
+}
+
+function saveProfile() {
+  saveLocal();
+  scheduleCloudPush();
+}
+
+// ── 雲端同步 ─────────────────────────────────────────
+//
+// 發布成 Claude artifact 時，頁面有一個專屬的小資料庫（db 能力）。自選股、
+// 提醒規則與偏好存在那裡，手機、電腦打開都是同一份；每日盤後更新也從那裡讀
+// 自選股清單，決定要抓哪些股票的資料。用 npm start 跑或直接開檔案時沒有這個
+// 能力，就照舊只存在這台瀏覽器的 localStorage。
+//
+// 主題與「目前看哪一檔」刻意不同步：每台裝置各自的瀏覽習慣。
+
+const SYNC_KEYS = ['watchlist', 'rules', 'risk', 'goals', 'newsFilter', 'taLookback', 'taCapital', 'taRiskPct', 'refreshSeconds'];
+const PROFILE_DOC = 'profile/main';
+const cloud = { ref: null, state: 'local', lastJson: null, timer: null, readOnly: false, writing: Promise.resolve() };
+
+const syncedPart = (p) => Object.fromEntries(SYNC_KEYS.filter((k) => p[k] !== undefined).map((k) => [k, p[k]]));
+
+const SYNC_TEXT = {
+  local: ['只存在這台瀏覽器', '自選股與提醒只存在這台瀏覽器，換裝置不會跟著走。'],
+  connecting: ['連線雲端中…', '正在讀取雲端的自選股與提醒…'],
+  synced: ['已雲端同步', '自選股、提醒規則與偏好已同步到雲端：手機、電腦打開都是同一份；每日盤後更新也會依這份清單抓資料。'],
+  readonly: ['唯讀', '這份自選股由擁有者維護，你可以瀏覽，但變更不會儲存到雲端。'],
+  error: ['同步暫時失敗', '雲端同步暫時失敗，變更先存在這台瀏覽器，恢復後會再同步。'],
+};
+
+function setSyncState(state) {
+  cloud.state = state;
+  const [short, long] = SYNC_TEXT[state] || SYNC_TEXT.local;
+  if ($('sync-status')) $('sync-status').textContent = long;
+  if ($('sync-badge')) {
+    $('sync-badge').textContent = short;
+    $('sync-badge').className = `text-[11px] ${state === 'synced' ? 'text-emerald-400' : state === 'error' ? 'text-amber-400' : 'text-slate-500'}`;
+  }
+}
+
+async function initCloudSync() {
+  const c = window.claude;
+  if (!c?.use) return setSyncState('local');
+  setSyncState('connecting');
+  let db = null;
+  let user = null;
+  try {
+    [db, user] = await Promise.all([c.use('db'), c.use('user')]);
+  } catch {
+    db = null;
+  }
+  if (!db) return setSyncState('local');
+
+  try {
+    cloud.readOnly = (await user?.can('data.write')) === false;
+  } catch {
+    cloud.readOnly = false;
+  }
+  cloud.ref = db.doc(PROFILE_DOC);
+
+  cloud.ref.onSnapshot((snap) => {
+    if (!snap.exists) {
+      // 雲端還沒有設定：由這台裝置建立第一份
+      setSyncState(cloud.readOnly ? 'readonly' : 'synced');
+      if (!cloud.readOnly) scheduleCloudPush(true);
+      return;
+    }
+    const remote = syncedPart(snap.data());
+    const json = JSON.stringify(remote);
+    setSyncState(cloud.readOnly ? 'readonly' : 'synced');
+    if (json === cloud.lastJson) return; // 自己剛寫上去的回音
+    cloud.lastJson = json;
+    if (json === JSON.stringify(syncedPart(profile))) return;
+    profile = { ...profile, ...remote };
+    saveLocal();
+    applyRemoteProfile();
+  }, () => setSyncState('error'));
+}
+
+/** 寫入合併成一次：連續操作（例如一直點）只在停下來後寫一次 */
+function scheduleCloudPush(immediate = false) {
+  if (!cloud.ref || cloud.readOnly) return;
+  clearTimeout(cloud.timer);
+  cloud.timer = setTimeout(pushCloud, immediate ? 0 : 600);
+}
+
+function pushCloud() {
+  const body = syncedPart(profile);
+  const json = JSON.stringify(body);
+  if (json === cloud.lastJson) return;
+  cloud.lastJson = json;
+  // 同一份文件一次只寫一筆：排在前一筆後面
+  cloud.writing = cloud.writing.then(() => cloud.ref.set({ ...body, updatedAt: new Date().toISOString() }))
+    .then(() => setSyncState('synced'))
+    .catch((err) => {
+      cloud.lastJson = null;
+      if (err?.code === 'invalid_argument' || err?.code === 'not_granted') {
+        cloud.readOnly = true;
+        setSyncState('readonly');
+      } else {
+        setSyncState('error');
+      }
+    });
+}
+
+/** 別台裝置改了設定：重畫目前的畫面 */
+function applyRemoteProfile() {
+  syncSettingsInputs();
+  scheduleRefresh();
+  taCache.clear();
+  refresh();
+  const active = document.querySelector('.tab-content.active')?.id?.replace('tab-', '');
+  if (active === 'technical') {
+    if (!profile.watchlist.includes(profile.taCode)) profile.taCode = null;
+    loadTechnical();
   }
 }
 
@@ -269,6 +385,7 @@ function showBanner(kind, message, notes = []) {
   const styles = {
     error: 'bg-danger-bg border-danger-line text-danger',
     warn: 'bg-warn-bg border-warn-line text-warn',
+    info: 'bg-accent-bg border-accent-line text-accent-ink',
   };
   $('banner').innerHTML = `
     <div class="rounded-lg border px-4 py-3 text-sm ${styles[kind] || styles.warn}">
@@ -285,7 +402,9 @@ function renderAll() {
   if (!latest) return;
 
   const d = latest.diagnostics;
-  if (d.offline) {
+  if (d.snapshot) {
+    showBanner('info', d.snapshot.note);
+  } else if (d.offline) {
     showBanner('warn', '離線模式：畫面上的數字來自內建樣本資料，非真實行情', d.notes);
   } else if (d.degraded) {
     showBanner('warn', '部分資料來源暫時失效，畫面上的數字可能不完整或稍舊', [...d.notes, ...d.sourceErrors]);
@@ -293,12 +412,16 @@ function renderAll() {
     $('banner').classList.add('hidden');
   }
 
-  $('updated').textContent = `更新於 ${new Date(latest.updatedAt).toLocaleTimeString('zh-TW')}`;
-  $('side-status').innerHTML = d.offline
-    ? '<span class="text-amber-400">離線樣本資料</span>'
-    : d.degraded
-      ? '<span class="text-amber-400">部分來源異常</span>'
-      : '<span class="text-emerald-400">資料正常</span>';
+  $('updated').textContent = d.snapshot
+    ? `資料至 ${d.snapshot.asOf}`
+    : `更新於 ${new Date(latest.updatedAt).toLocaleTimeString('zh-TW')}`;
+  $('side-status').innerHTML = d.snapshot
+    ? `<span class="text-emerald-400">盤後快照 · ${esc(d.snapshot.asOf)}</span>`
+    : d.offline
+      ? '<span class="text-amber-400">離線樣本資料</span>'
+      : d.degraded
+        ? '<span class="text-amber-400">部分來源異常</span>'
+        : '<span class="text-emerald-400">資料正常</span>';
 
   renderOverview();
   renderNews();
@@ -1911,3 +2034,4 @@ applyTheme(profile.theme);   // 按鈕是 initEvents 之後才存在，圖示要
 switchTab(location.hash.replace('#', '') || 'overview');
 refresh();
 scheduleRefresh();
+initCloudSync();
