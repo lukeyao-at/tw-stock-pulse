@@ -1,0 +1,136 @@
+//@version=5
+// 台股脈動：通道回測下緣
+// 算法與 src/technical.js 的 fitChannel / locate / backtest 進場條件一致：
+//  - 用「前 N 根」收盤價做線性迴歸 → 中軌；上緣 = 中軌 + 高點偏離的 95 百分位；
+//    下緣 = 中軌 + 低點偏離的 5 百分位；再延伸到當根 K 線（不含當根，沒有未來資料）
+//  - 進場訊號：當根最低價碰到下緣附近、收盤沒跌破下緣、通道不是下降通道
+//  - 停損 = 下緣 − 1 ATR（與 進場價 − 1 ATR 取較低）；目標 = 通道上緣
+indicator("通道回測下緣（台股脈動）", shorttitle="通道", overlay=true, max_lines_count=10, max_bars_back=300)
+
+lookback    = input.int(120, "通道長度（日）", minval=30, maxval=240)
+trendRatio  = input.float(0.6, "趨勢門檻（期間漂移 ÷ 通道寬度）", step=0.1)
+touchZone   = input.float(0.12, "觸碰區（占通道寬度比例）", step=0.01)
+minConfirm  = input.int(0, "指標確認至少幾項（0 = 純通道）", minval=0, maxval=5)
+showSignals = input.bool(true, "標示歷史進場訊號")
+n = lookback
+
+// ── 通道（每根 K 線都用它以前的 n 根重算）──────────────
+float icpt  = na
+float slp   = na
+float upOff = na
+float loOff = na
+float upper = na
+float lower = na
+float mid   = na
+float ratio = na
+
+if bar_index >= n + 1
+    float sumY = 0.0
+    for k = 1 to n
+        sumY += close[k]
+    float yMean = sumY / n
+    float xMean = (n - 1) / 2.0
+    float sxy = 0.0
+    float sxx = 0.0
+    for i = 0 to n - 1
+        float dx = i - xMean
+        sxy += dx * (close[n - i] - yMean)
+        sxx += dx * dx
+    slp := sxy / sxx
+    icpt := yMean - slp * xMean
+
+    arrHi = array.new_float(0)
+    arrLo = array.new_float(0)
+    for i = 0 to n - 1
+        float fitV = icpt + slp * i
+        array.push(arrHi, high[n - i] - fitV)
+        array.push(arrLo, low[n - i] - fitV)
+    upOff := array.percentile_linear_interpolation(arrHi, 95)
+    loOff := array.percentile_linear_interpolation(arrLo, 5)
+
+    float width = upOff - loOff
+    if width > 0
+        mid   := icpt + slp * n
+        upper := mid + upOff
+        lower := mid + loOff
+        ratio := slp * (n - 1) / width
+
+hasCh   = not na(upper)
+isUp    = hasCh and ratio > trendRatio
+isDown  = hasCh and ratio < -trendRatio
+w       = upper - lower
+isBreakdown = hasCh and close < lower
+isBreakout  = hasCh and close > upper
+isLower = hasCh and not isBreakdown and not isBreakout and low <= lower + w * touchZone
+isUpper = hasCh and not isBreakdown and not isBreakout and not isLower and high >= upper - w * touchZone
+
+// ── 指標確認（與回測的 buyConfirmations 相同）──────────
+rsiV = ta.rsi(close, 14)
+hh = ta.highest(high, 9)
+ll = ta.lowest(low, 9)
+rsv = hh == ll ? 50.0 : (close - ll) / (hh - ll) * 100
+var float kv = 50.0
+var float dv = 50.0
+kv := 2.0 / 3 * kv + rsv / 3
+dv := 2.0 / 3 * dv + kv / 3
+kdUp = ta.barssince(ta.crossover(kv, dv))
+[macdL, macdS, macdH] = ta.macd(close, 12, 26, 9)
+volMa = ta.sma(volume, 20)
+atr14 = ta.atr(14)
+
+c1 = rsiV < 40
+c2 = kv < 30 and not na(kdUp) and kdUp <= 2
+c3 = not na(macdH[1]) and macdH > macdH[1] and macdH < 0
+c4 = not na(volMa) and volume < volMa * 0.8
+c5 = close > open and close > close[1]
+nConf = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0)
+
+entry = isLower and not isDown and nConf >= minConfirm and not na(atr14)
+stopP = math.min(lower - atr14, close - atr14)
+rr    = (close - stopP) > 0 ? (upper - close) / (close - stopP) : na
+
+// 連續幾天的訊號只標第一個
+barsSinceEntry = ta.barssince(entry)
+sigMark = entry and nz(barsSinceEntry[1], 99) > 5
+plotshape(showSignals and sigMark, "進場訊號", shape.triangleup, location.belowbar, color.new(color.green, 0), text="買", textcolor=color.green, size=size.small)
+plotshape(showSignals and isBreakdown and not isDown and not isBreakdown[1], "跌破通道", shape.xcross, location.belowbar, color.new(color.red, 0), size=size.tiny)
+alertcondition(entry, "通道回測下緣進場訊號", "{{ticker}} 回測通道下緣，符合進場條件")
+
+// ── 最新一根：畫通道線與資訊表 ─────────────────────────
+var line lnU = na
+var line lnM = na
+var line lnL = na
+var linefill lf = na
+var table tb = table.new(position.top_right, 2, 8, border_width=1)
+
+if barstate.islast and hasCh
+    line.delete(lnU)
+    line.delete(lnM)
+    line.delete(lnL)
+    linefill.delete(lf)
+    x1 = bar_index - n
+    x2 = bar_index
+    lnU := line.new(x1, icpt + upOff, x2, icpt + slp * n + upOff, color=color.red, width=2)
+    lnM := line.new(x1, icpt, x2, icpt + slp * n, color=color.gray, style=line.style_dashed)
+    lnL := line.new(x1, icpt + loOff, x2, icpt + slp * n + loOff, color=color.green, width=2)
+    lf := linefill.new(lnU, lnL, color.new(color.blue, 92))
+
+    trendTxt = isUp ? "上升通道" : isDown ? "下降通道" : "箱型整理"
+    zoneTxt  = isBreakdown ? "跌破下緣" : isBreakout ? "突破上緣" : isLower ? "回測下緣" : isUpper ? "接近上緣" : "通道中段"
+    confTxt  = (c1 ? "RSI低檔 " : "") + (c2 ? "KD金叉 " : "") + (c3 ? "MACD收斂 " : "") + (c4 ? "量縮 " : "") + (c5 ? "收紅K " : "")
+    tb.cell(0, 0, "通道", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 0, trendTxt)
+    tb.cell(0, 1, "位置", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 1, zoneTxt)
+    tb.cell(0, 2, "下緣", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 2, str.tostring(lower, "#.##"))
+    tb.cell(0, 3, "上緣（目標）", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 3, str.tostring(upper, "#.##"))
+    tb.cell(0, 4, "停損（以收盤估）", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 4, str.tostring(stopP, "#.##"))
+    tb.cell(0, 5, "風險報酬比", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 5, na(rr) ? "—" : str.tostring(rr, "#.##"))
+    tb.cell(0, 6, "指標確認", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 6, str.tostring(nConf) + " 項 " + confTxt)
+    tb.cell(0, 7, "進場訊號", text_color=color.gray, text_halign=text.align_left)
+    tb.cell(1, 7, entry ? "符合" : "無", text_color=entry ? color.green : color.gray)
