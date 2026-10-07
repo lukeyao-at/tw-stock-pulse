@@ -214,7 +214,7 @@ test('報告：髒資料（null、0）會被濾掉，欄位齊全', () => {
   assert.equal(r.ok, true);
   assert.equal(r.barCount, 300);
   assert.ok(r.analysis.verdict.label);
-  assert.equal(r.analysis.timeframes.length, 3);
+  assert.equal(r.analysis.timeframes.length, 4);
   assert.equal(r.chart.bars.length, r.chart.ma20.length);
   assert.ok(r.chart.channel.length > 0 && r.chart.channel.length <= 121);
   assert.equal(typeof r.analysis.channel.line, 'undefined', '函式不該出現在 JSON 回應裡');

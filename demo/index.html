@@ -1811,8 +1811,8 @@ function summarizeTrades(trades, limit) {
 
 // ── 對外：完整報告 ────────────────────────────────────
 
-/** 多週期比較用的通道長度（約一季、半年、一年） */
-const TIMEFRAMES = [60, 120, 240];
+/** 多週期比較用的通道長度（約一個半月、一季、半年、一年） */
+const TIMEFRAMES = [30, 60, 120, 240];
 
 /** 圖表在通道之前再多畫幾根，看得出通道是從哪裡開始的 */
 const CHART_LEAD = 30;
@@ -2885,6 +2885,7 @@ function renderDiagnostics() {
 // 所以只在打開這個分頁、選了某一檔時才另外打 /api/technical。
 
 const TA_LOOKBACKS = [
+  [30, '30 日', '約一個半月，短線進出；通道短、觸碰次數少，可靠度較低'],
   [60, '60 日', '約一季，適合波段短線'],
   [120, '120 日', '約半年，預設'],
   [240, '240 日', '約一年，看大趨勢'],
@@ -3098,7 +3099,7 @@ function signalRows(a) {
 }
 
 function timeframeCard(a) {
-  const tfLabel = { 60: '短（60 日）', 120: '中（120 日）', 240: '長（240 日）' };
+  const tfLabel = { 30: '超短（30 日）', 60: '短（60 日）', 120: '中（120 日）', 240: '長（240 日）' };
   const rows = a.timeframes.map((tf) => {
     if (!tf.available) return `<li class="flex justify-between text-sm"><span class="text-muted">${tfLabel[tf.lookback]}</span><span class="text-faint">資料不足</span></li>`;
     const tone = tf.trend === 'up' ? 'text-up' : tf.trend === 'down' ? 'text-down' : 'text-sub';
@@ -3113,7 +3114,7 @@ function timeframeCard(a) {
   const aligned = trends.length >= 2 && trends.every((x) => x === trends[0]);
   const summary = !trends.length ? ''
     : aligned
-      ? `三個週期方向一致（${trends[0] === 'up' ? '都向上' : trends[0] === 'down' ? '都向下' : '都是盤整'}），訊號可信度較高。`
+      ? `${['', '', '兩', '三', '四'][trends.length]}個週期方向一致（${trends[0] === 'up' ? '都向上' : trends[0] === 'down' ? '都向下' : '都是盤整'}），訊號可信度較高。`
       : '長短週期方向不一致：短線訊號可能只是大趨勢裡的一段反向波動，部位宜縮小。';
 
   return `<div class="bg-surface rounded-xl border border-line">
