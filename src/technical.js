@@ -667,13 +667,18 @@ const BOX_VOLUME = 1.5;
  *     兩者都用收盤，盤中影線穿過不算。突破或失效後重新找下一個箱子，
  *     突破那根的最高點成為下一個候選箱頂
  *
- * @returns {{breakout:Array, confirmed:Array}} 與 bars 等長：
+ * @returns {{breakout:Array, confirmed:Array, list:Array}}
  *   breakout[i] = 第 i 根收盤突破了哪個箱子；confirmed[i] = 第 i 根收盤時新成立的箱子
+ *   （兩個陣列與 bars 等長，裡面的箱子物件不會再被修改）
+ *   list = 依時間排序的所有箱子，含結局：{ ...box, endIdx, status }，
+ *   status：'open' 還在整理、'breakout' 已向上突破、'failed' 已跌破箱底；畫圖用
  */
 export function detectBoxes(bars, k = BOX_CONFIRM) {
   const breakout = new Array(bars.length).fill(null);
   const confirmed = new Array(bars.length).fill(null);
+  const list = [];
   let box = null;
+  let entry = null;
   let top = null;
   let topIdx = -1;
   let topDone = false;
@@ -694,9 +699,13 @@ export function detectBoxes(bars, k = BOX_CONFIRM) {
     if (box) {
       if (b.close > box.top) {
         breakout[i] = box;
+        entry.endIdx = i;
+        entry.status = 'breakout';
         box = null;
         restart(i);
       } else if (b.close < box.bottom) {
+        entry.endIdx = i;
+        entry.status = 'failed';
         box = null;
         restart(i);
       }
@@ -721,11 +730,13 @@ export function detectBoxes(bars, k = BOX_CONFIRM) {
       bot = b.low;
       botIdx = i;
     } else if (i - botIdx >= k && top > bot) {
-      box = { top, bottom: bot, topDate: bars[topIdx].date, since: bars[i].date };
+      box = { top, bottom: bot, topDate: bars[topIdx].date, since: bars[i].date, topIdx, sinceIdx: i };
       confirmed[i] = box;
+      entry = { ...box, endIdx: null, status: 'open' };
+      list.push(entry);
     }
   }
-  return { breakout, confirmed };
+  return { breakout, confirmed, list };
 }
 
 /**
@@ -842,6 +853,24 @@ export function report(bars, { lookback = 120, capital, riskPct } = {}) {
   const pick = (arr) => arr.slice(from).map((v) => round(v, 2));
   const ch = ev.channel;
 
+  // 圖上畫的箱型：只留與圖表區間有重疊的最近 6 個（再早的箱子畫上去只會擠成一團）
+  const boxes = detectBoxes(clean).list
+    .filter((b) => (b.endIdx ?? i) >= from)
+    .slice(-6)
+    .map((b) => {
+      const volAvg = b.endIdx !== null ? ind.volMa20[b.endIdx] : null;
+      return {
+        top: round(b.top, 2),
+        bottom: round(b.bottom, 2),
+        startDate: clean[Math.max(b.topIdx, from)].date,
+        endDate: clean[b.endIdx ?? i].date,
+        confirmedDate: b.since,
+        status: b.status,
+        // 突破那天有沒有放量（回測的進場條件）；還在整理或失效的箱子沒有這個值
+        volumeConfirmed: b.status === 'breakout' && volAvg ? clean[b.endIdx].volume >= volAvg * BOX_VOLUME : null,
+      };
+    });
+
   // 歷史的觸碰點（在圖上標示），同樣逐日重擬通道、不偷看未來
   const markers = [];
   for (let j = Math.max(from, lb + 1); j <= i; j++) {
@@ -926,6 +955,7 @@ export function report(bars, { lookback = 120, capital, riskPct } = {}) {
       d: pick(ind.kd.d),
       channel: channelLine,
       markers: thinned,
+      boxes,
     },
     disclaimer: '技術分析是根據歷史價量的機率判斷，不保證未來走勢；歷史驗證不代表未來績效。本工具不構成投資建議。',
   };

@@ -104,37 +104,23 @@
 
         <div class="px-4 md:px-8 py-6">
 
-            <!-- ═══ 總覽 ═══ -->
+            <!-- ═══ 總覽：持股、自選股兩個區塊 ═══ -->
             <section id="tab-overview" class="tab-content active">
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="kpi-cards"></div>
-
-                <div class="grid lg:grid-cols-3 gap-6 mt-6">
-                    <div class="lg:col-span-2 bg-surface rounded-xl border border-line">
-                        <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
-                            <h2 class="font-semibold">自選股</h2>
-                            <span class="text-xs text-muted" id="watch-count"></span>
-                        </div>
-                        <div class="overflow-x-auto"><div id="watch-table"></div></div>
+                <div class="bg-surface rounded-xl border border-line">
+                    <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
+                        <h2 class="font-semibold">持股</h2>
+                        <span class="text-xs text-muted" id="holding-count"></span>
                     </div>
-
-                    <div class="space-y-6">
-                        <div class="bg-surface rounded-xl border border-line">
-                            <div class="px-5 py-3.5 border-b border-line-soft">
-                                <h2 class="font-semibold">觸發中的提醒</h2>
-                            </div>
-                            <div id="overview-alerts" class="p-5 space-y-2.5"></div>
-                        </div>
-
-                        <div class="bg-surface rounded-xl border border-line">
-                            <div class="px-5 py-3.5 border-b border-line-soft">
-                                <h2 class="font-semibold">近期事件</h2>
-                            </div>
-                            <div id="overview-events" class="p-5 space-y-2.5"></div>
-                        </div>
-                    </div>
+                    <div class="overflow-x-auto"><div id="holding-table"></div></div>
                 </div>
 
-                <div class="grid lg:grid-cols-3 gap-6 mt-6" id="market-movers"></div>
+                <div class="bg-surface rounded-xl border border-line mt-6">
+                    <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
+                        <h2 class="font-semibold">自選股</h2>
+                        <span class="text-xs text-muted" id="watch-count"></span>
+                    </div>
+                    <div class="overflow-x-auto"><div id="watch-table"></div></div>
+                </div>
             </section>
 
             <!-- ═══ 產業雷達 ═══ -->

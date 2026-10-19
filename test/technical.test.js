@@ -269,6 +269,33 @@ test('箱型偵測沒有未來資料：截掉後面的 K 線，之前的結果�
   assert.deepEqual(cut.confirmed, full.confirmed.slice(0, 200));
 });
 
+test('箱型偵測：list 記錄每個箱子的起訖與結局（整理中／突破／失效）', () => {
+  const full = detectBoxes(boxPattern(), 3).list;
+  assert.equal(full.length, 1);
+  const [b] = full;
+  assert.deepEqual([b.top, b.bottom, b.topIdx, b.sinceIdx, b.endIdx, b.status], [110, 100, 1, 6, 7, 'breakout']);
+
+  const open = detectBoxes(boxPattern().slice(0, 7), 3).list;
+  assert.deepEqual([open[0].status, open[0].endIdx], ['open', null], '截到第 6 根時箱子還在整理');
+
+  const bars = boxPattern();
+  bars[7] = { ...dated([mk(104, 105, 96, 98)])[0], date: bars[7].date };
+  assert.equal(detectBoxes(bars, 3).list[0].status, 'failed');
+});
+
+test('報告的圖表資料帶有箱型：價位、起訖日、結局，且都落在圖表區間內', () => {
+  const r = report(channelBars(300, { amp: 10 }), { lookback: 120 });
+  assert.ok(Array.isArray(r.chart.boxes));
+  assert.ok(r.chart.boxes.length >= 1 && r.chart.boxes.length <= 6);
+  const first = r.chart.bars[0].date;
+  const last = r.chart.bars.at(-1).date;
+  for (const b of r.chart.boxes) {
+    assert.ok(b.top > b.bottom);
+    assert.ok(b.startDate >= first && b.endDate <= last && b.startDate <= b.endDate);
+    assert.ok(['open', 'breakout', 'failed'].includes(b.status));
+  }
+});
+
 /** 前面 25 根低檔整理，接著上面的箱子，放量突破後隔天開盤 112 進場 */
 function boxTradeBars(after) {
   const flat = Array.from({ length: 25 }, () => mk(87, 90, 85, 88));

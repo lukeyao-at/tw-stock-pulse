@@ -1,5 +1,5 @@
 {
-  "_comment": "每日盤後報告（npm run report）追蹤的清單。改這裡記得同步 public/app.js 的 DEFAULT_WATCHLIST。",
+  "_comment": "每日盤後報告（npm run report）追蹤的清單。改這裡記得同步 public/app.js 的 DEFAULT_WATCHLIST 與 DEFAULT_HOLDINGS（總覽的「持股」區塊）。",
   "holdings": ["5880", "00919", "00931B"],
   "groups": {
     "製程・材料": ["2338", "1711", "3532", "6488", "5347", "2303", "2330"],

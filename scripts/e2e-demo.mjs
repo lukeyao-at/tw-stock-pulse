@@ -83,6 +83,13 @@ check('移除自選', (await watchCount(p)) === n0, `→ ${await watchCount(p)}`
 // 從自選跳技術分析
 await p.click('#watch-table [data-ta-open]'); await p.waitForTimeout(800);
 check('自選 → 技術分析', await p.$eval('#tab-technical', (e) => e.classList.contains('active')) && await p.isVisible('#ta-charts svg'));
+check('K 線圖圖例有箱型', (await visibleText(p, '#ta-body')).includes('箱型（整理中）'));
+let boxesSeen = 0;
+for (const k of [1, 2, 3]) {
+  await p.click(`#ta-picker button:nth-child(${k})`); await p.waitForTimeout(500);
+  boxesSeen += await p.$$eval('#ta-charts svg[data-panel=price] g title', (t) => t.filter((e) => e.textContent.startsWith('箱型')).length);
+}
+check('K 線圖上畫得出箱型', boxesSeen > 0, `前 3 檔共 ${boxesSeen} 個箱型`);
 
 // 技術分析操作
 await p.click('#ta-picker button:nth-child(2)'); await p.waitForTimeout(600);
@@ -122,7 +129,22 @@ await p.click('[data-flow-view=sector]'); await p.waitForTimeout(300);
 
 // 策略分析工具不該出現任何損益欄位
 check('沒有持股損益分頁', !(await p.$('#tab-holdings')) && !(await p.$('[data-tab=holdings]')));
-check('總覽沒有損益數字', !/損益|持股市值/.test(await visibleText(p, '#kpi-cards')), await visibleText(p, '#kpi-cards'));
+await tab(p, 'overview');
+const overviewText = await visibleText(p, '#tab-overview');
+check('總覽沒有損益數字', !/損益|持股市值/.test(overviewText), overviewText.slice(0, 60));
+check('總覽只有持股、自選股兩個區塊',
+  (await p.$$eval('#tab-overview h2', (h) => h.map((e) => e.textContent.trim()))).join('|') === '持股|自選股'
+  && !(await p.$('#kpi-cards, #overview-alerts, #overview-events, #market-movers')));
+
+// 持股：自選股點錢包圖示移到持股，再點一次移回
+const h0 = await p.$$eval('#holding-table tbody tr', (r) => r.length);
+const w0n = await watchCount(p);
+await p.click('#watch-table [data-toggle-holding]'); await p.waitForTimeout(300);
+check('自選股設為持股', (await p.$$eval('#holding-table tbody tr', (r) => r.length)) === h0 + 1 && (await watchCount(p)) === w0n - 1,
+  `持股 ${h0} → ${await p.$$eval('#holding-table tbody tr', (r) => r.length)}、自選 ${w0n} → ${await watchCount(p)}`);
+await p.click('#holding-table tbody tr:last-child [data-toggle-holding]'); await p.waitForTimeout(300);
+check('持股移回自選股', (await p.$$eval('#holding-table tbody tr', (r) => r.length)) === h0 && (await watchCount(p)) === w0n);
+check('持股設定會存起來', await p.evaluate(() => Array.isArray(profile.holdings)));
 check('設定沒有手續費選項', !(await p.$('#s-fees')) && !(await p.$('#s-discount')));
 
 // 推薦
@@ -186,7 +208,8 @@ await p.click('#reset'); await p.waitForTimeout(300);
 check('設定：清除第一次只是確認', (await visibleText(p, '#reset')).includes('再按一次') && (await p.evaluate(() => profile.watchlist.length)) === 2);
 await p.click('#reset'); await p.waitForTimeout(800);
 const afterReset = await p.evaluate(() => profile.watchlist.length).catch(() => -1);
-check('設定：清除全部（不靠 confirm）', afterReset === await p.evaluate(() => DEFAULT_WATCHLIST.length) && (await watchCount(p)) === afterReset, `清除後自選 ${afterReset} 檔`);
+const shown = (await watchCount(p)) + (await p.$$eval('#holding-table tbody tr', (r) => r.length));
+check('設定：清除全部（不靠 confirm）', afterReset === await p.evaluate(() => DEFAULT_WATCHLIST.length) && shown === afterReset, `清除後清單 ${afterReset} 檔、畫面持股＋自選 ${shown} 檔`);
 check('沒有呼叫任何 alert/confirm', (await p.evaluate(() => window.__dialogs.length)) === 0, JSON.stringify(await p.evaluate(() => window.__dialogs)));
 check('沒有 JS 錯誤', p.errs.length === 0, p.errs.join(' | '));
 

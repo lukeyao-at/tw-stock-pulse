@@ -24,11 +24,19 @@ const DEFAULT_WATCHLIST = [
   '3323', '8358', '2383', '6274', '3037', '8046', '5289', '3260', '2344', '2408',
 ];
 
+/**
+ * 預設持股（與 data/watchlist.json 的 holdings 同步）。總覽把持股與其他自選股分兩個區塊顯示；
+ * 持股一定也在自選股裡，所以每日盤後更新讀雲端的 watchlist 就涵蓋了持股。
+ * 只取確實在預設自選股裡的，展示版（樣本只有部分個股）才不會出現查無資料的持股。
+ */
+const DEFAULT_HOLDINGS = ['5880', '00919', '00931B'];
+
 /** 舊版的預設清單。存檔若還是一字不差的舊預設，代表沒被改過，可以安全換成新預設 */
 const LEGACY_DEFAULT_WATCHLIST = ['2330', '2317', '2454', '2881', '2603'];
 
 const DEFAULT_PROFILE = {
   watchlist: DEFAULT_WATCHLIST,
+  holdings: [],
   rules: [],
   risk: 'balanced',
   goals: ['dividend'],
@@ -94,7 +102,19 @@ const FACTOR_LABELS = {
 // ── 狀態 ─────────────────────────────────────────────
 
 /** 每次都給新的陣列：直接展開 DEFAULT_PROFILE 會共用陣列，push 自選股時會改到預設值本身 */
-const freshDefaults = () => ({ ...DEFAULT_PROFILE, watchlist: [...DEFAULT_WATCHLIST], rules: [], goals: [...DEFAULT_PROFILE.goals] });
+const freshDefaults = () => ({
+  ...DEFAULT_PROFILE,
+  watchlist: [...DEFAULT_WATCHLIST],
+  holdings: DEFAULT_HOLDINGS.filter((c) => DEFAULT_WATCHLIST.includes(c)),
+  rules: [],
+  goals: [...DEFAULT_PROFILE.goals],
+});
+
+/** 持股必須在自選股裡（自選股被移除或雲端清單沒有時，持股跟著拿掉），並去除重複 */
+function pruneHoldings(p) {
+  p.holdings = [...new Set(Array.isArray(p.holdings) ? p.holdings : [])].filter((c) => p.watchlist.includes(c));
+  return p;
+}
 
 function loadProfile() {
   try {
@@ -106,7 +126,7 @@ function loadProfile() {
     if (JSON.stringify(saved.watchlist) === JSON.stringify(LEGACY_DEFAULT_WATCHLIST)) {
       saved.watchlist = [...DEFAULT_WATCHLIST];
     }
-    return saved;
+    return pruneHoldings(saved);
   } catch {
     return freshDefaults();
   }
@@ -139,7 +159,7 @@ function saveProfile() {
 //
 // 主題與「目前看哪一檔」刻意不同步：每台裝置各自的瀏覽習慣。
 
-const SYNC_KEYS = ['watchlist', 'rules', 'risk', 'goals', 'newsFilter', 'taLookback', 'taCapital', 'taRiskPct', 'refreshSeconds'];
+const SYNC_KEYS = ['watchlist', 'holdings', 'rules', 'risk', 'goals', 'newsFilter', 'taLookback', 'taCapital', 'taRiskPct', 'refreshSeconds'];
 const PROFILE_DOC = 'profile/main';
 const cloud = { ref: null, state: 'local', lastJson: null, timer: null, readOnly: false, writing: Promise.resolve() };
 
@@ -196,7 +216,7 @@ async function initCloudSync() {
     if (json === cloud.lastJson) return; // 自己剛寫上去的回音
     cloud.lastJson = json;
     if (json === JSON.stringify(syncedPart(profile))) return;
-    profile = { ...profile, ...remote };
+    profile = pruneHoldings({ ...profile, ...remote });
     saveLocal();
     applyRemoteProfile();
   }, () => setSyncState('error'));
@@ -433,46 +453,23 @@ function renderAll() {
 }
 
 function renderOverview() {
-  const { alerts, events, market, news } = latest;
-  const rows = latest.watchlist.filter((w) => typeof w.changePercent === 'number');
-  const up = rows.filter((w) => w.changePercent > 0).length;
-  const down = rows.filter((w) => w.changePercent < 0).length;
-  const avgChange = rows.length ? rows.reduce((a, w) => a + w.changePercent, 0) / rows.length : null;
+  const holdingSet = new Set(profile.holdings);
+  const byCode = new Map(latest.watchlist.map((w) => [w.code, w]));
+  const holdings = profile.holdings.map((c) => byCode.get(c)).filter(Boolean);
+  const watching = latest.watchlist.filter((w) => !holdingSet.has(w.code));
 
-  const cards = [
-    {
-      label: '自選股今日',
-      value: `${up} 漲 / ${down} 跌`,
-      sub: avgChange === null ? '—' : `平均 ${signed(avgChange)}%`,
-      icon: 'star',
-      trend: avgChange,
-    },
-    {
-      label: '全市場漲跌家數',
-      value: `${fmtInt(market.gainers)} / ${fmtInt(market.losers)}`,
-      sub: market.total ? `上漲占 ${fmt((market.gainers / market.total) * 100, 0)}%` : '—',
-      icon: 'trend-up',
-      trend: market.gainers - market.losers,
-    },
-    { label: '觸發中的提醒', value: fmtInt(alerts.triggered.length), sub: `共 ${profile.rules.length} 條規則`, icon: 'bell' },
-    { label: '自選股新聞氛圍', value: news.mood.mood, sub: `利多 ${news.mood.counts.利多} / 利空 ${news.mood.counts.利空}`, icon: 'newspaper' },
-  ];
+  $('holding-count').textContent = `${holdings.length} 檔`;
+  $('holding-table').innerHTML = stockTable(holdings, true,
+    '還沒有持股：在下方自選股點錢包圖示，就會移到這裡');
+  $('watch-count').textContent = `${watching.length} 檔`;
+  $('watch-table').innerHTML = stockTable(watching, false,
+    latest.watchlist.length === 0 ? '還沒有自選股，用上方搜尋框加入' : '所有自選股都已設為持股');
+}
 
-  $('kpi-cards').innerHTML = cards.map((c) => `
-    <div class="bg-surface rounded-xl border border-line p-4">
-      <div class="flex items-start justify-between">
-        <span class="text-xs text-muted">${esc(c.label)}</span>
-        <svg class="w-4 h-4 text-dim shrink-0" aria-hidden="true"><use href="#i-${c.icon}"/></svg>
-      </div>
-      <div class="mt-2 text-xl font-semibold num ${c.trend !== undefined ? trendClass(c.trend) : ''}">${esc(c.value)}</div>
-      <div class="text-xs text-muted mt-0.5 num">${esc(c.sub)}</div>
-    </div>`).join('');
-
-  // ── 自選股表格
-  $('watch-count').textContent = `${latest.watchlist.length} 檔`;
-  $('watch-table').innerHTML = latest.watchlist.length === 0
-    ? emptyState('還沒有自選股，用上方搜尋框加入', 'star')
-    : `<table class="w-full text-sm">
+/** 持股與自選股共用的表格；兩邊的差別只在「移到另一邊」按鈕的圖示與說明 */
+function stockTable(rows, isHolding, emptyText) {
+  if (rows.length === 0) return emptyState(emptyText, isHolding ? 'wallet' : 'star');
+  return `<table class="w-full text-sm">
         <thead class="bg-raised text-muted text-xs">
           <tr>
             <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
@@ -485,7 +482,7 @@ function renderOverview() {
           </tr>
         </thead>
         <tbody class="divide-y divide-line-soft">
-          ${latest.watchlist.map((s) => `
+          ${rows.map((s) => `
             <tr class="hover:bg-raised">
               <td class="px-5 py-3 whitespace-nowrap">
                 <div class="font-medium">${esc(s.name)}</div>
@@ -509,6 +506,9 @@ function renderOverview() {
                 <button data-ta-open="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="技術分析">
                   <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-chart-line"/></svg>
                 </button>
+                <button data-toggle-holding="${esc(s.code)}" class="${isHolding ? 'text-accent-ink' : 'text-faint hover:text-accent-ink'} px-1" title="${isHolding ? '移回自選股' : '設為持股'}" aria-pressed="${isHolding}">
+                  <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-wallet"/></svg>
+                </button>
                 <button data-remove-watch="${esc(s.code)}" class="text-faint hover:text-danger px-1" title="移除">
                   <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
                 </button>
@@ -516,55 +516,6 @@ function renderOverview() {
             </tr>`).join('')}
         </tbody>
       </table>`;
-
-  // ── 提醒 / 事件
-  $('overview-alerts').innerHTML = alerts.triggered.length === 0
-    ? emptyState('目前沒有觸發的提醒', 'bell-slash')
-    : alerts.triggered.slice(0, 6).map(alertRow).join('');
-
-  $('overview-events').innerHTML = events.length === 0
-    ? emptyState('30 天內沒有相關事件', 'calendar')
-    : events.slice(0, 6).map((e) => `
-        <div class="flex items-start gap-2.5 text-sm">
-          <span class="mt-0.5 px-1.5 py-0.5 rounded bg-track text-sub text-[11px] shrink-0">${esc(e.kind)}</span>
-          <div class="min-w-0">
-            <div class="truncate">${esc(e.name || e.code)}</div>
-            <div class="text-xs text-muted num">${esc(e.date)}${e.detail ? ` · ${esc(e.detail)}` : ''}</div>
-          </div>
-        </div>`).join('');
-
-  // ── 市場動態
-  const movers = [
-    ['漲幅前五', market.topGainers, 'arrow-up text-up'],
-    ['跌幅前五', market.topLosers, 'arrow-down text-down'],
-    ['成交值前五', market.mostActive, 'fire text-warn-strong'],
-  ];
-  $('market-movers').innerHTML = movers.map(([title, rows, icon]) => {
-    const [iconName, ...iconRest] = icon.split(' ');
-    const iconClass = iconRest.join(' ');
-    return `
-    <div class="bg-surface rounded-xl border border-line">
-      <div class="px-5 py-3.5 border-b border-line-soft flex items-center gap-2">
-        <svg class="w-4 h-4 shrink-0 ${iconClass}" aria-hidden="true"><use href="#i-${iconName}"/></svg><h2 class="font-semibold text-sm">${esc(title)}</h2>
-      </div>
-      <div class="divide-y divide-line-soft">
-        ${rows.map((s) => `
-          <div class="px-5 py-2.5 flex items-center justify-between text-sm">
-            <div class="min-w-0">
-              <div class="truncate font-medium">${esc(s.name)}</div>
-              <div class="text-xs text-muted num">${esc(s.code)}</div>
-            </div>
-            <div class="text-right shrink-0 ml-2">
-              <div class="num">${fmt(s.close)}</div>
-              <div class="text-xs num ${trendClass(s.changePercent)}">${signed(s.changePercent)}%</div>
-            </div>
-            <button data-add-watch="${esc(s.code)}" class="ml-3 text-dim hover:text-brand-600" title="加入自選">
-              <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-plus"/></svg>
-            </button>
-          </div>`).join('')}
-      </div>
-    </div>`;
-  }).join('');
 }
 
 function alertRow(a) {
@@ -1169,6 +1120,7 @@ function lastBars(c, n) {
     bars: cut(c.bars), ma20: cut(c.ma20), ma60: cut(c.ma60), rsi: cut(c.rsi), k: cut(c.k), d: cut(c.d),
     channel: c.channel.filter((p) => p.date >= first),
     markers: c.markers.filter((m) => m.date >= first),
+    boxes: (c.boxes ?? []).filter((b) => b.endDate >= first).map((b) => (b.startDate < first ? { ...b, startDate: first } : b)),
   };
 }
 
@@ -1197,6 +1149,9 @@ function chartLegend() {
     ${line(series('s1'), '通道中軌', '4 3')}
     ${line(series('s2'), 'MA20 月線')}
     ${line(series('s3'), 'MA60 季線', '6 3')}
+    ${mark('M1 2H9V8H1z', series('warn'), '箱型（整理中）', true)}
+    ${mark('M1 2H9V8H1z', series('up'), '已突破', true)}
+    ${mark('M1 2H9V8H1z', series('faint'), '已跌破', true)}
     ${mark('M5 1L9 9H1z', series('up'), '指標確認的下緣買點')}
     ${mark('M5 9L9 1H1z', series('down'), '上緣賣訊')}
     ${mark('M1 1L9 9M9 1L1 9', series('warn'), '跌破通道', true)}
@@ -1242,8 +1197,10 @@ function priceChartSvg(c) {
   const idx = new Map(c.bars.map((b, i) => [b.date, i]));
 
   const chan = c.channel.map((p) => ({ ...p, i: idx.get(p.date) })).filter((p) => p.i !== undefined);
-  const lows = [...c.bars.map((b) => b.low), ...chan.map((p) => p.lower)];
-  const highs = [...c.bars.map((b) => b.high), ...chan.map((p) => p.upper)];
+  const boxes = (c.boxes ?? []).map((b) => ({ ...b, i0: idx.get(b.startDate), i1: idx.get(b.endDate) }))
+    .filter((b) => b.i0 !== undefined && b.i1 !== undefined);
+  const lows = [...c.bars.map((b) => b.low), ...chan.map((p) => p.lower), ...boxes.map((b) => b.bottom)];
+  const highs = [...c.bars.map((b) => b.high), ...chan.map((p) => p.upper), ...boxes.map((b) => b.top)];
   let min = Math.min(...lows);
   let max = Math.max(...highs);
   const pad = (max - min) * 0.04;
@@ -1265,6 +1222,27 @@ function priceChartSvg(c) {
     <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.upper).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2"/>
     <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.lower).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2"/>
     <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.mid).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.8"/>` : '';
+
+  // 箱型：整理中（橘）、已向上突破（紅虛線，放量的標「放量」）、已跌破箱底（灰）
+  const boxStyle = {
+    open: { color: series('warn'), fill: 0.1, dash: '', width: 1.6 },
+    breakout: { color: series('up'), fill: 0.06, dash: '5 3', width: 1.4 },
+    failed: { color: series('faint'), fill: 0.06, dash: '2 3', width: 1.2 },
+  };
+  const boxLabel = { open: '整理中', breakout: '已突破', failed: '已跌破' };
+  const boxSvg = boxes.map((b) => {
+    const st = boxStyle[b.status] ?? boxStyle.open;
+    const x0 = x(b.i0) - step / 2;
+    const w = Math.max(step, x(b.i1) + step / 2 - x0);
+    const detail = `${b.startDate} ～ ${b.endDate}　箱頂 ${fmt(b.top)}／箱底 ${fmt(b.bottom)}`;
+    const tag = b.status === 'breakout'
+      ? `<text x="${(x0 + w).toFixed(1)}" y="${(y(b.top) - 4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="${st.color}">突破${b.volumeConfirmed ? '放量' : '（量不足）'}</text>`
+      : '';
+    return `<g><title>箱型（${boxLabel[b.status] ?? ''}）${detail}</title>
+      <rect x="${x0.toFixed(1)}" y="${y(b.top).toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1, y(b.bottom) - y(b.top)).toFixed(1)}"
+            fill="${st.color}" fill-opacity="${st.fill}" stroke="${st.color}" stroke-width="${st.width}" ${st.dash ? `stroke-dasharray="${st.dash}"` : ''}/>
+      ${tag}</g>`;
+  }).join('');
 
   const bodyW = Math.max(1, step * 0.62);
   const candles = c.bars.map((b, i) => {
@@ -1292,6 +1270,11 @@ function priceChartSvg(c) {
     labels.push({ v: last.upper, text: `上緣 ${fmt(last.upper)}`, color: series('s1') });
     labels.push({ v: last.lower, text: `下緣 ${fmt(last.lower)}`, color: series('s1') });
   }
+  const openBox = boxes.find((b) => b.status === 'open');
+  if (openBox) {
+    labels.push({ v: openBox.top, text: `箱頂 ${fmt(openBox.top)}`, color: series('warn') });
+    labels.push({ v: openBox.bottom, text: `箱底 ${fmt(openBox.bottom)}`, color: series('warn') });
+  }
   const ma20 = c.ma20[n - 1];
   const ma60 = c.ma60[n - 1];
   if (ma20 !== null) labels.push({ v: ma20, text: 'MA20', color: series('s2') });
@@ -1306,8 +1289,8 @@ function priceChartSvg(c) {
   }).join('');
 
   return `<svg viewBox="0 0 ${CHART_W} ${H}" class="w-full h-auto block select-none" role="img"
-      aria-label="${esc(`近 ${n} 個交易日 K 線、趨勢通道與均線`)}" data-panel="price" data-top="${top}" data-bottom="${bottom}">
-    ${grid}${xTicks}${band}
+      aria-label="${esc(`近 ${n} 個交易日 K 線、趨勢通道、箱型與均線`)}" data-panel="price" data-top="${top}" data-bottom="${bottom}">
+    ${grid}${xTicks}${boxSvg}${band}
     <path d="${pathOf(c.ma60, x, y)}" fill="none" stroke="${series('s3')}" stroke-width="1.5" stroke-dasharray="6 3"/>
     <path d="${pathOf(c.ma20, x, y)}" fill="none" stroke="${series('s2')}" stroke-width="1.5"/>
     ${candles}${markers}${endLabels}
@@ -1770,7 +1753,7 @@ function initEvents() {
     </button>`).join('');
 
   document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open], [data-flow-view]');
+    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-toggle-holding], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open], [data-flow-view]');
     if (!target) return;
 
     const d = target.dataset;
@@ -1803,8 +1786,18 @@ function initEvents() {
       return loadTechnical();
     }
 
+    if (d.toggleHolding) {
+      const code = d.toggleHolding;
+      profile.holdings = profile.holdings.includes(code)
+        ? profile.holdings.filter((c) => c !== code)
+        : [...profile.holdings, code];
+      saveProfile();
+      return renderOverview();
+    }
+
     if (d.removeWatch) {
       profile.watchlist = profile.watchlist.filter((c) => c !== d.removeWatch);
+      pruneHoldings(profile);
       saveProfile();
       return refresh();
     }
@@ -2061,7 +2054,7 @@ function applyProfile(incoming, message) {
   if (incoming.watchlist !== undefined && !Array.isArray(incoming.watchlist)) {
     throw new Error('watchlist 必須是代號陣列');
   }
-  profile = { ...freshDefaults(), ...incoming };
+  profile = pruneHoldings({ ...freshDefaults(), ...incoming });
   saveProfile();
   syncSettingsInputs();
   applyTheme(profile.theme);
