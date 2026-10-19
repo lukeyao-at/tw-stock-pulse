@@ -20,7 +20,8 @@ import * as cache from './cache.js';
 import { analyze, summarize } from './sentiment.js';
 import { symbolsFor } from './match.js';
 import { recommend } from './recommend.js';
-import { report as technicalReport } from './technical.js';
+import { report as technicalReport, indexSummary } from './technical.js';
+import { marketSummary } from './market.js';
 import { sampleBars } from './sample-bars.js';
 import * as sector from './sources/sector.js';
 import * as finmind from './sources/finmind.js';
@@ -159,8 +160,19 @@ export async function dashboard(body = {}) {
       priceSource: live ? (live.estimated ? '盤中推估' : '盤中') : '收盤',
       newsCount: personalized.filter((n) => n.matchedSymbols.some((m) => m.code === w.code)).length,
       unknown: !stock && !live,
+      // 總覽的通道／箱型判讀需要兩年日 K；伺服器版不在這裡逐檔抓，技術分析分頁再看
+      ta: null,
     };
   });
+
+  let index = null;
+  if (!OFFLINE) {
+    try {
+      index = indexSummary(await history.indexBars('1y'));
+    } catch (err) {
+      sourceErrors.push(`加權指數：${err.message}`);
+    }
+  }
 
   const recommendations = recommend(uni.stocks, {
     risk: body.risk,
@@ -201,6 +213,8 @@ export async function dashboard(body = {}) {
     alerts: fired,
     events: upcoming,
     market: {
+      index,
+      summary: marketSummary(uni.stocks),
       total: uni.stocks.length,
       gainers: uni.stocks.filter((s) => (s.changePercent ?? 0) > 0).length,
       losers: uni.stocks.filter((s) => (s.changePercent ?? 0) < 0).length,

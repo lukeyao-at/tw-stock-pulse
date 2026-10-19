@@ -45,6 +45,8 @@ const DEFAULT_PROFILE = {
   theme: 'system',
   taCode: null,
   taLookback: 120,
+  // K 線圖顯示幾根（0 = 全部）；各裝置螢幕不同，不跟雲端同步
+  taBars: 120,
   taCapital: 1000000,
   taRiskPct: 1,
 };
@@ -73,25 +75,12 @@ const GOALS = [
   ['growth', '成長動能'],
 ];
 
-const RULE_TYPES = {
-  price_above: { label: '股價高於', unit: '元', needsValue: true },
-  price_below: { label: '股價低於', unit: '元', needsValue: true },
-  pct_above: { label: '單日漲幅超過', unit: '%', needsValue: true },
-  pct_below: { label: '單日跌幅超過', unit: '%', needsValue: true },
-  volume_spike: { label: '成交量放大倍數超過', unit: '倍', needsValue: true },
-  news_bullish: { label: '出現利多新聞', unit: '', needsValue: false },
-  news_bearish: { label: '出現利空新聞', unit: '', needsValue: false },
-  event_upcoming: { label: '天內有除權息或法說會', unit: '天', needsValue: true },
-};
-
 const TABS = [
   ['overview', '總覽', 'gauge'],
   ['technical', '技術分析', 'chart-line'],
   ['radar', '產業雷達', 'fire'],
   ['news', '個人化新聞', 'newspaper'],
   ['recommend', '推薦標的', 'lightbulb'],
-  ['alerts', '提醒', 'bell'],
-  ['settings', '設定', 'gear'],
 ];
 
 const FACTOR_LABELS = {
@@ -250,7 +239,6 @@ function pushCloud() {
 
 /** 別台裝置改了設定：重畫目前的畫面 */
 function applyRemoteProfile() {
-  syncSettingsInputs();
   scheduleRefresh();
   taCache.clear();
   refresh();
@@ -384,6 +372,8 @@ async function refresh() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         watchlist: profile.watchlist,
+        // 總覽每檔的通道判讀，用跟技術分析分頁相同的通道長度
+        lookback: profile.taLookback,
         rules: profile.rules,
         risk: profile.risk,
         goals: profile.goals,
@@ -446,90 +436,459 @@ function renderAll() {
   renderOverview();
   renderNews();
   renderRecommend();
-  renderAlerts();
-  renderDiagnostics();
   // 自選股名稱要等 dashboard 回來才有，技術分析的標的清單跟著更新
   if ($('tab-technical').classList.contains('active')) renderTechnicalControls();
 }
 
+// ── 總覽 ─────────────────────────────────────────────
+//
+// 一眼看完三件事：市場今天怎樣、持股現在在通道與箱型的哪裡、自選股裡誰出現訊號。
+// 圖依容器實際寬度畫（不是固定 viewBox 縮放），字和線在任何螢幕上都是原本的大小。
+
 function renderOverview() {
-  const holdingSet = new Set(profile.holdings);
+  renderMarket();
+  renderHoldings();
+  renderWatchlist();
+}
+
+const fmtTurnover = (n) => (!Number.isFinite(n) ? '—'
+  : n >= 1e12 ? `${(n / 1e12).toFixed(2)} 兆` : `${Math.round(n / 1e8).toLocaleString('zh-TW')} 億`);
+
+/** 圖例：線用短線、區塊用方塊，與圖上的記號一致 */
+function legendHtml(items) {
+  return `<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-sub">${items.map(([label, color, kind = 'line']) => `
+    <span class="inline-flex items-center gap-1.5">${kind === 'box'
+      ? `<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:${color}"></span>`
+      : `<svg width="16" height="8" aria-hidden="true"><line x1="0" y1="4" x2="16" y2="4" stroke="${color}" stroke-width="2" ${kind === 'dash' ? 'stroke-dasharray="4 3"' : ''}/></svg>`}${esc(label)}</span>`).join('')}</div>`;
+}
+
+function renderMarket() {
+  const m = latest.market;
+  const idx = m.index;
+  $('ov-asof').textContent = idx ? `資料至 ${idx.date}` : '';
+
+  $('ov-index').innerHTML = idx ? `
+    <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+      <div>
+        <div class="text-sm text-muted">加權指數</div>
+        <div class="flex flex-wrap items-baseline gap-x-3 mt-0.5">
+          <span class="text-3xl font-semibold">${esc(Math.round(idx.close).toLocaleString('zh-TW'))}</span>
+          <span class="text-base font-medium num ${trendClass(idx.change)}">${signed(idx.change)}（${signed(idx.changePercent)}%）</span>
+        </div>
+      </div>
+      ${legendHtml([['收盤', series('s1')], ['MA20 月線', series('s2')], ['MA60 季線', series('s3'), 'dash']])}
+    </div>
+    <div id="ov-index-chart" class="relative mt-3"></div>`
+    : `<div class="text-sm text-muted">加權指數</div>${emptyState('這次沒有抓到加權指數', 'chart-line')}`;
+  if (idx) {
+    drawLineChart($('ov-index-chart'), {
+      dates: idx.series.map((p) => p.date),
+      height: 240,
+      series: [
+        { label: '收盤', values: idx.series.map((p) => p.close), color: series('s1'), width: 2, area: true, endLabel: true },
+        { label: 'MA20', values: idx.series.map((p) => p.ma20), color: series('s2'), width: 1.5 },
+        { label: 'MA60', values: idx.series.map((p) => p.ma60), color: series('s3'), width: 1.5, dash: '5 3' },
+      ],
+      format: (v) => Math.round(v).toLocaleString('zh-TW'),
+    });
+  }
+
+  renderBreadth(m.summary);
+  renderSectors(m.summary);
+  renderFlowsOverview();
+  // 類股成交與法人資料在產業雷達的回應裡；總覽也要用，背景載入一次就好
+  if (!radarLatest && !radarLoading) loadRadar({ quiet: true });
+}
+
+function renderBreadth(sum) {
+  if (!sum || !sum.total) {
+    $('ov-breadth').innerHTML = `<div class="text-sm text-muted">漲跌家數</div>${emptyState('沒有全市場行情', 'chart-pie')}`;
+    return;
+  }
+  const seg = [
+    ['上漲', sum.up, 'bg-up'],
+    ['平盤', sum.flat, 'bg-faint'],
+    ['下跌', sum.down, 'bg-down'],
+  ];
+  const totals = radarLatest?.ok ? radarLatest.rotation?.totals ?? [] : [];
+  const avg20 = totals.length ? totals.reduce((a, t) => a + t.total, 0) / totals.length : null;
+  const lastTwse = totals.at(-1)?.total ?? null;
+
+  $('ov-breadth').innerHTML = `
+    <div class="text-sm text-muted">漲跌家數</div>
+    <div class="flex items-baseline gap-2 mt-0.5">
+      <span class="text-3xl font-semibold">${esc(((sum.up / sum.total) * 100).toFixed(0))}%</span>
+      <span class="text-sm text-sub">上漲占比（共 ${esc(sum.total.toLocaleString('zh-TW'))} 檔）</span>
+    </div>
+    <div class="flex h-3 mt-3 gap-[2px]" role="img" aria-label="上漲 ${sum.up}、平盤 ${sum.flat}、下跌 ${sum.down} 檔">
+      ${seg.filter(([, n]) => n > 0).map(([label, n, cls], k, arr) => `<div class="${cls} ${k === 0 ? 'rounded-l' : ''} ${k === arr.length - 1 ? 'rounded-r' : ''}"
+        style="width:${((n / sum.total) * 100).toFixed(2)}%" title="${label} ${n} 檔"></div>`).join('')}
+    </div>
+    <div class="flex justify-between mt-2 text-sm">
+      ${seg.map(([label, n, cls]) => `<span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm ${cls}"></span>${label} <span class="num font-medium">${n.toLocaleString('zh-TW')}</span></span>`).join('')}
+    </div>
+
+    <div class="mt-6 pt-4 border-t border-line-soft">
+      <div class="text-sm text-muted">全市場成交值</div>
+      <div class="flex flex-wrap items-baseline gap-x-2 mt-0.5">
+        <span class="text-2xl font-semibold">${esc(fmtTurnover(sum.turnover))}</span>
+        ${avg20 && lastTwse ? `<span class="text-sm text-sub">上市較 20 日均 <span class="num ${trendClass(lastTwse - avg20)}">${signed((lastTwse / avg20 - 1) * 100)}%</span></span>` : ''}
+      </div>
+      ${totals.length ? `<div id="ov-turnover-chart" class="mt-2"></div><div class="text-xs text-muted mt-1">上市成交值・近 ${totals.length} 個交易日（最後一根是最新一天）</div>`
+        : `<div class="text-xs text-faint mt-2">${radarLoading ? '近 20 日成交值載入中…' : ''}</div>`}
+    </div>`;
+  if (totals.length) {
+    drawColumns($('ov-turnover-chart'), {
+      values: totals.map((t) => t.total),
+      labels: totals.map((t) => `${t.date}　${fmtTurnover(t.total)}`),
+      height: 72,
+    });
+  }
+}
+
+/**
+ * 正負對稱的水平長條（台股慣例：漲／買超紅色往右，跌／賣超綠色往左）。
+ * 數值另外寫在條尾並帶正負號，不只靠顏色分辨方向。
+ */
+function divergingRows(rows, { format, unit = '' }) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-9);
+  return `<ul class="space-y-1.5">${rows.map((r) => {
+    const w = (Math.abs(r.value) / max) * 100;
+    const bar = `<div class="h-3.5 ${r.value >= 0 ? 'bg-up rounded-r' : 'bg-down rounded-l'}" style="width:${w.toFixed(1)}%"></div>`;
+    return `<li class="flex items-center gap-3 text-sm" title="${esc(r.title || '')}">
+      <span class="w-24 shrink-0 truncate text-sub">${esc(r.name)}</span>
+      <div class="flex-1 flex items-center min-w-0">
+        <div class="w-1/2 flex justify-end">${r.value < 0 ? bar : ''}</div>
+        <div class="w-px h-5 bg-line shrink-0"></div>
+        <div class="w-1/2 flex">${r.value >= 0 ? bar : ''}</div>
+      </div>
+      <span class="w-20 shrink-0 text-right num font-medium">${esc(format(r.value))}${esc(unit)}</span>
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function renderSectors(sum) {
+  const list = sum?.sectors ?? [];
+  $('ov-sectors').innerHTML = `
+    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+      <h3 class="font-semibold">產業今日漲跌</h3>
+      <span class="text-xs text-muted">成交值加權・只列成交比重 ≥ 0.5% 的產業</span>
+    </div>
+    ${list.length ? divergingRows(list.map((s) => ({
+      name: s.name, value: s.changePercent,
+      title: `${s.name}：${signed(s.changePercent)}%，成交比重 ${fmt(s.share)}%，${s.count} 檔`,
+    })), { format: (v) => `${signed(v)}%` }) : emptyState('沒有產業資料', 'chart-pie')}`;
+}
+
+function renderFlowsOverview() {
+  const r = radarLatest;
+  const head = (note) => `<div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+      <h3 class="font-semibold">三大法人買賣超</h3><span class="text-xs text-muted">${esc(note)}</span></div>`;
+  if (!r) {
+    $('ov-flows').innerHTML = head('') + `<p class="text-sm text-muted py-6 text-center">${radarLoading ? '法人資料載入中…' : '尚未載入'}</p>`;
+    return;
+  }
+  const f = r.ok ? r.flows : null;
+  if (!f?.sectors?.length) {
+    $('ov-flows').innerHTML = head('') + emptyState(r.reason || '這次沒有法人資料', 'chart-pie');
+    return;
+  }
+  const sorted = [...f.sectors].sort((a, b) => b.total - a.total);
+  const buy = sorted.filter((s) => s.total > 0).slice(0, 6);
+  const sell = sorted.filter((s) => s.total < 0).slice(-6);
+  $('ov-flows').innerHTML = head(`${f.market}・近 ${f.days} 日合計・單位億元`)
+    + divergingRows([...buy, ...sell].map((s) => ({
+      name: s.name, value: s.total / 1e8,
+      title: `${s.name}：外資 ${fmt(s.foreign / 1e8, 1)} 億、投信 ${fmt(s.trust / 1e8, 1)} 億、自營 ${fmt(s.dealer / 1e8, 1)} 億`,
+    })), { format: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}` });
+}
+
+// ── 持股：每檔一張卡
+
+function renderHoldings() {
   const byCode = new Map(latest.watchlist.map((w) => [w.code, w]));
-  const holdings = profile.holdings.map((c) => byCode.get(c)).filter(Boolean);
-  const watching = latest.watchlist.filter((w) => !holdingSet.has(w.code));
-
-  $('holding-count').textContent = `${holdings.length} 檔`;
-  $('holding-table').innerHTML = stockTable(holdings, true,
-    '還沒有持股：在下方自選股點錢包圖示，就會移到這裡');
-  $('watch-count').textContent = `${watching.length} 檔`;
-  $('watch-table').innerHTML = stockTable(watching, false,
-    latest.watchlist.length === 0 ? '還沒有自選股，用上方搜尋框加入' : '所有自選股都已設為持股');
+  const rows = profile.holdings.map((c) => byCode.get(c)).filter(Boolean);
+  $('holding-count').textContent = `${rows.length} 檔`;
+  $('holding-cards').innerHTML = rows.length === 0
+    ? `<div class="md:col-span-2 xl:col-span-3 bg-surface rounded-xl border border-line">${emptyState('還沒有持股：在下方自選股點錢包圖示，就會移到這裡', 'wallet')}</div>`
+    : rows.map(holdingCard).join('');
+  for (const s of rows) {
+    const el = document.querySelector(`[data-mini="${CSS.escape(s.code)}"]`);
+    if (el && s.ta) drawMiniChart(el, s.ta, { height: 130 });
+  }
 }
 
-/** 持股與自選股共用的表格；兩邊的差別只在「移到另一邊」按鈕的圖示與說明 */
-function stockTable(rows, isHolding, emptyText) {
-  if (rows.length === 0) return emptyState(emptyText, isHolding ? 'wallet' : 'star');
-  return `<table class="w-full text-sm">
-        <thead class="bg-raised text-muted text-xs">
-          <tr>
-            <th class="whitespace-nowrap text-left font-medium px-5 py-2.5">標的</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">股價</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5">漲跌</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5 hidden sm:table-cell">本益比</th>
-            <th class="whitespace-nowrap text-right font-medium px-3 py-2.5 hidden sm:table-cell">殖利率</th>
-            <th class="whitespace-nowrap text-center font-medium px-3 py-2.5">新聞</th>
-            <th class="px-3 py-2.5"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line-soft">
-          ${rows.map((s) => `
-            <tr class="hover:bg-raised">
-              <td class="px-5 py-3 whitespace-nowrap">
-                <div class="font-medium">${esc(s.name)}</div>
-                <div class="text-xs text-muted num">${esc(s.code)}
-                  ${s.industry ? `<span class="ml-1 text-faint hidden sm:inline">${esc(s.industry)}</span>` : ''}
-                  ${s.unknown ? '<span class="ml-1 text-warn">查無資料</span>' : ''}
-                </div>
-              </td>
-              <td class="px-3 py-3 text-right num font-medium">${fmt(s.price)}
-                ${s.priceSource === '盤中推估' ? '<div class="text-[10px] text-faint">推估</div>' : ''}
-              </td>
-              <td class="px-3 py-3 text-right num ${trendClass(s.changePercent)}">
-                ${signed(s.change)}<div class="text-xs">${signed(s.changePercent)}%</div>
-              </td>
-              <td class="px-3 py-3 text-right num hidden sm:table-cell text-sub">${fmt(s.peRatio, 1)}</td>
-              <td class="px-3 py-3 text-right num hidden sm:table-cell text-sub">${s.dividendYield !== null ? fmt(s.dividendYield) + '%' : '—'}</td>
-              <td class="px-3 py-3 text-center">
-                ${s.newsCount > 0 ? `<span class="inline-block px-2 py-0.5 rounded-full bg-accent-bg text-accent-ink text-xs num">${s.newsCount}</span>` : '<span class="text-dim">—</span>'}
-              </td>
-              <td class="px-3 py-3 text-right whitespace-nowrap">
-                <button data-ta-open="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="技術分析">
-                  <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-chart-line"/></svg>
-                </button>
-                <button data-toggle-holding="${esc(s.code)}" class="${isHolding ? 'text-accent-ink' : 'text-faint hover:text-accent-ink'} px-1" title="${isHolding ? '移回自選股' : '設為持股'}" aria-pressed="${isHolding}">
-                  <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-wallet"/></svg>
-                </button>
-                <button data-remove-watch="${esc(s.code)}" class="text-faint hover:text-danger px-1" title="移除">
-                  <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
-                </button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
+const verdictChip = (v) => (v ? `<span class="shrink-0 text-xs px-2 py-0.5 rounded border ${TONE_STYLE[v.tone] || TONE_STYLE.neutral}">${esc(v.label)}</span>` : '');
+
+function boxText(box) {
+  if (!box) return '目前沒有箱型';
+  const when = box.daysAgo === 0 ? '今天' : `${box.daysAgo} 天前`;
+  if (box.status === 'open') return `整理中 ${fmt(box.bottom)}～${fmt(box.top)}`;
+  if (box.status === 'breakout') return `${when}突破箱頂 ${fmt(box.top)}${box.volumeConfirmed ? '（放量）' : '（量不足）'}`;
+  return `${when}跌破箱底 ${fmt(box.bottom)}`;
 }
 
-function alertRow(a) {
-  // 台股紅漲綠跌：warning（下跌/利空）走綠、info（上漲/利多）走紅，
-  // neutral（除權息、法說會等無方向性事件）走灰。
-  const tone = {
-    warning: 'bg-down-bg border-down-line',
-    neutral: 'bg-raised border-line',
-  }[a.severity] || 'bg-up-bg border-up-line';
-  return `<div class="rounded-lg border ${tone} px-3 py-2.5 text-sm">
-    <div>${esc(a.message)}</div>
-    ${a.news ? a.news.map((n) => `<a href="${esc(n.link)}" target="_blank" rel="noopener"
-        class="block mt-1 text-xs text-accent-ink hover:underline truncate">${esc(n.title)}</a>`).join('') : ''}
+/** 通道位置：0% = 下緣、100% = 上緣；超出通道的釘在兩端並標出來 */
+function channelMeter(t, { compact = false } = {}) {
+  const pos = Math.max(0, Math.min(1, t.position));
+  const out = t.position < 0 ? '跌破' : t.position > 1 ? '突破' : '';
+  return `<div class="${compact ? 'w-28' : ''}">
+    <div class="relative h-2 rounded-full bg-track mt-1.5" role="img" aria-label="通道位置 ${Math.round(t.position * 100)}%">
+      <div class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full border-2 ${t.position < 0 ? 'bg-down' : t.position > 1 ? 'bg-up' : 'bg-brand-600'}"
+           style="left:${(pos * 100).toFixed(1)}%;border-color:rgb(var(--c-surface))"></div>
+    </div>
+    ${compact ? `<div class="text-[11px] text-muted num mt-1">${out || `位置 ${Math.round(t.position * 100)}%`}</div>`
+      : `<div class="flex justify-between text-xs text-muted num mt-1"><span>下緣 ${fmt(t.lower)}</span><span>${out || `${Math.round(t.position * 100)}%`}</span><span>上緣 ${fmt(t.upper)}</span></div>`}
   </div>`;
+}
+
+function flagList(flags) {
+  if (!flags?.length) return '';
+  const icon = { up: 'arrow-up', down: 'warning', neutral: 'info' };
+  return `<ul class="mt-3 space-y-1">${flags.map((f) => `<li class="flex items-center gap-1.5 text-sm ${f.tone === 'up' ? 'text-up' : f.tone === 'down' ? 'text-down' : 'text-sub'}">
+    <svg class="w-4 h-4 shrink-0" aria-hidden="true"><use href="#i-${icon[f.tone] || 'info'}"/></svg><span class="text-ink">${esc(f.text)}</span></li>`).join('')}</ul>`;
+}
+
+function holdingCard(s) {
+  const t = s.ta;
+  return `<div class="bg-surface rounded-xl border border-line p-4 flex flex-col" data-holding-card="${esc(s.code)}">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="font-semibold truncate">${esc(s.name)}</div>
+        <div class="text-xs text-muted num">${esc(s.code)}${s.industry ? ` · ${esc(s.industry)}` : ''}</div>
+      </div>
+      ${t ? verdictChip(t.verdict) : ''}
+    </div>
+    <div class="flex flex-wrap items-baseline gap-x-2 mt-2">
+      <span class="text-2xl font-semibold">${fmt(s.price)}</span>
+      <span class="text-sm num ${trendClass(s.changePercent)}">${signed(s.change)}（${signed(s.changePercent)}%）</span>
+    </div>
+    ${t ? `
+      <div class="mt-2 -mx-1 relative" data-mini="${esc(s.code)}"></div>
+      <div class="mt-3 text-sm"><span class="text-muted">通道</span> <span class="font-medium">${esc(t.trendLabel.replace('（箱型整理）', ''))}</span> · ${esc(ZONE_LABEL[t.zone] || '')}</div>
+      ${channelMeter(t)}
+      <div class="mt-3 text-sm"><span class="text-muted">箱型</span> ${esc(boxText(t.box))}</div>
+      <div class="grid grid-cols-2 gap-2 mt-3 text-sm">
+        <div class="rounded-lg bg-raised px-3 py-2"><div class="text-[11px] text-muted">停損參考</div><div class="num font-medium">${fmt(t.stop)}</div></div>
+        <div class="rounded-lg bg-raised px-3 py-2"><div class="text-[11px] text-muted">目標（通道上緣）</div><div class="num font-medium">${fmt(t.target)}</div></div>
+      </div>
+      ${flagList(t.flags)}`
+    : '<p class="text-sm text-muted mt-3">這一版沒有它的日 K，無法判讀通道與箱型</p>'}
+    <div class="mt-auto pt-3 flex items-center gap-1 border-t border-line-soft mt-4">
+      <button data-ta-open="${esc(s.code)}" class="text-sm text-accent-ink hover:underline">看技術分析</button>
+      <span class="flex-1"></span>
+      <button data-toggle-holding="${esc(s.code)}" class="text-accent-ink px-1.5 py-1" title="移回自選股" aria-pressed="true">
+        <svg class="w-4 h-4" aria-hidden="true"><use href="#i-wallet"/></svg></button>
+      <button data-remove-watch="${esc(s.code)}" class="text-faint hover:text-danger px-1.5 py-1" title="移除">
+        <svg class="w-4 h-4" aria-hidden="true"><use href="#i-xmark"/></svg></button>
+    </div>
+  </div>`;
+}
+
+// ── 自選股：一列一檔，走勢、通道位置、箱型、判讀並排
+
+function renderWatchlist() {
+  const holdingSet = new Set(profile.holdings);
+  const rows = latest.watchlist.filter((w) => !holdingSet.has(w.code));
+  $('watch-count').textContent = `${rows.length} 檔`;
+  if (rows.length === 0) {
+    $('watch-table').innerHTML = emptyState(latest.watchlist.length === 0 ? '還沒有自選股，用上方搜尋框加入' : '所有自選股都已設為持股', 'star');
+    return;
+  }
+  const th = (label, cls = '') => `<th class="whitespace-nowrap font-medium px-3 py-2.5 ${cls}">${label}</th>`;
+  $('watch-table').innerHTML = `<table class="w-full text-sm">
+    <thead class="bg-raised text-muted text-xs"><tr>
+      ${th('標的', 'text-left pl-5')}${th('收盤', 'text-right')}${th('漲跌', 'text-right')}
+      ${th('近 60 日', 'text-left hidden md:table-cell')}${th('通道位置', 'text-left')}${th('箱型', 'text-left hidden lg:table-cell')}
+      ${th('判讀與提示', 'text-left')}<th class="px-3 py-2.5"></th>
+    </tr></thead>
+    <tbody class="divide-y divide-line-soft">${rows.map((s) => {
+      const t = s.ta;
+      return `<tr class="hover:bg-raised align-top">
+        <td class="pl-5 pr-3 py-3 whitespace-nowrap">
+          <div class="font-medium">${esc(s.name)}</div>
+          <div class="text-xs text-muted num">${esc(s.code)}${s.industry ? `<span class="ml-1 text-faint hidden sm:inline">${esc(s.industry)}</span>` : ''}${s.unknown ? '<span class="ml-1 text-warn">查無資料</span>' : ''}</div>
+        </td>
+        <td class="px-3 py-3 text-right num font-medium whitespace-nowrap">${fmt(s.price)}</td>
+        <td class="px-3 py-3 text-right num whitespace-nowrap ${trendClass(s.changePercent)}">${signed(s.changePercent)}%</td>
+        <td class="px-3 py-2 hidden md:table-cell">${t ? sparkSvg(t, 132, 36) : '<span class="text-dim">—</span>'}</td>
+        <td class="px-3 py-3 whitespace-nowrap">${t ? `<div class="text-xs text-sub">${esc(t.trendLabel.replace('（箱型整理）', ''))}・${esc(ZONE_LABEL[t.zone] || '')}</div>${channelMeter(t, { compact: true })}` : '<span class="text-dim">—</span>'}</td>
+        <td class="px-3 py-3 text-xs text-sub hidden lg:table-cell min-w-[10rem]">${t ? esc(boxText(t.box)) : '—'}</td>
+        <td class="px-3 py-3 min-w-[12rem]">${t ? `${verdictChip(t.verdict)}${t.flags.length ? `<div class="mt-1.5 space-y-0.5">${t.flags.map((f) => `<div class="text-xs ${f.tone === 'up' ? 'text-up' : f.tone === 'down' ? 'text-down' : 'text-sub'}">● <span class="text-ink">${esc(f.text)}</span></div>`).join('')}</div>` : ''}` : '<span class="text-dim">—</span>'}</td>
+        <td class="px-3 py-3 text-right whitespace-nowrap">
+          <button data-ta-open="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="技術分析"><svg class="w-4 h-4 inline-block" aria-hidden="true"><use href="#i-chart-line"/></svg></button>
+          <button data-toggle-holding="${esc(s.code)}" class="text-faint hover:text-accent-ink px-1" title="設為持股" aria-pressed="false"><svg class="w-4 h-4 inline-block" aria-hidden="true"><use href="#i-wallet"/></svg></button>
+          <button data-remove-watch="${esc(s.code)}" class="text-faint hover:text-danger px-1" title="移除"><svg class="w-4 h-4 inline-block" aria-hidden="true"><use href="#i-xmark"/></svg></button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+// ── 總覽用的小圖（手刻 SVG）
+
+const BOX_STYLE = {
+  open: { color: 'warn', fill: 0.12, dash: '' },
+  breakout: { color: 'up', fill: 0.08, dash: '5 3' },
+  failed: { color: 'faint', fill: 0.08, dash: '2 3' },
+};
+
+/** 表格裡的走勢小圖：收盤線＋通道帶＋箱型，只表達形狀；數字在旁邊的欄位 */
+function sparkSvg(t, W, H) {
+  const { closes, upper, lower } = t.spark;
+  const n = closes.length;
+  const vals = [...closes, ...upper.filter((v) => v !== null), ...lower.filter((v) => v !== null)];
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const x = (i) => 2 + (i / Math.max(1, n - 1)) * (W - 6);
+  const y = (v) => H - 2 - ((v - min) / (max - min || 1)) * (H - 4);
+  const line = (arr) => pathOf(arr, x, y);
+  const band = upper.some((v) => v !== null) ? `<path d="${line(upper)}${[...lower].map((v, i) => [v, i]).reverse().filter(([v]) => v !== null).map(([v, i]) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}Z" fill="${series('s1')}" fill-opacity="0.1"/>` : '';
+  const up = closes[n - 1] >= closes[0];
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    ${band}<path d="${line(closes)}" fill="none" stroke="${series(up ? 'up' : 'down')}" stroke-width="1.75" stroke-linejoin="round"/>
+    <circle cx="${x(n - 1)}" cy="${y(closes[n - 1])}" r="2.5" fill="${series(up ? 'up' : 'down')}"/></svg>`;
+}
+
+/** 持股卡的走勢圖：收盤線、通道上下緣、箱型，滑過顯示日期與收盤 */
+function drawMiniChart(el, t, { height = 130 } = {}) {
+  const W = Math.max(240, el.clientWidth || 320);
+  const H = height;
+  const pad = { l: 4, r: 52, t: 8, b: 8 };
+  const { dates, closes, upper, lower } = t.spark;
+  const n = closes.length;
+  const box = t.box;
+  const vals = [...closes, ...upper.filter((v) => v !== null), ...lower.filter((v) => v !== null), ...(box ? [box.top, box.bottom] : [])];
+  let min = Math.min(...vals);
+  let max = Math.max(...vals);
+  const padV = (max - min) * 0.05 || 1;
+  min -= padV; max += padV;
+  const x = (i) => pad.l + (i / Math.max(1, n - 1)) * (W - pad.l - pad.r);
+  const y = (v) => H - pad.b - ((v - min) / (max - min)) * (H - pad.t - pad.b);
+  const st = box ? BOX_STYLE[box.status] || BOX_STYLE.open : null;
+  const boxRect = box ? `<rect x="${x(box.start).toFixed(1)}" y="${y(box.top).toFixed(1)}" width="${Math.max(3, x(box.end) - x(box.start)).toFixed(1)}" height="${Math.max(1, y(box.bottom) - y(box.top)).toFixed(1)}"
+      fill="${series(st.color)}" fill-opacity="${st.fill}" stroke="${series(st.color)}" stroke-width="1.5" ${st.dash ? `stroke-dasharray="${st.dash}"` : ''}/>` : '';
+  const last = closes[n - 1];
+  const lastU = upper[n - 1];
+  const lastL = lower[n - 1];
+  const labels = [
+    lastU !== null ? { v: lastU, text: `上 ${fmt(lastU)}` } : null,
+    lastL !== null ? { v: lastL, text: `下 ${fmt(lastL)}` } : null,
+  ].filter(Boolean).sort((a, b) => y(a.v) - y(b.v));
+  let prevY = -Infinity;
+  const endLabels = labels.map((l) => {
+    const ly = Math.max(y(l.v) + 4, prevY + 13);
+    prevY = ly;
+    return `<text x="${W - pad.r + 6}" y="${ly}" font-size="11" fill="rgb(var(--c-muted))">${esc(l.text)}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="block select-none" role="img" aria-label="近 ${n} 個交易日收盤與通道">
+    ${boxRect}
+    ${lastU !== null ? `<path d="${pathOf(upper, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="1.5"/>` : ''}
+    ${lastL !== null ? `<path d="${pathOf(lower, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="1.5"/>` : ''}
+    <path d="${pathOf(closes, x, y)}" fill="none" stroke="rgb(var(--c-ink))" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${x(n - 1)}" cy="${y(last)}" r="4" fill="rgb(var(--c-ink))" stroke="rgb(var(--c-surface))" stroke-width="2"/>
+    ${endLabels}
+    <line class="mini-cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" stroke="rgb(var(--c-faint))" stroke-width="1" visibility="hidden"/>
+    <rect x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" fill="transparent" class="mini-hit"/>
+  </svg>
+  <div class="mini-tip hidden absolute z-10 pointer-events-none bg-surface border border-line rounded-md shadow-lg px-2 py-1 text-xs num whitespace-nowrap"></div>`;
+  bindSimpleHover(el, { n, x, W, pad, row: (i) => `<span class="font-medium">${fmt(closes[i])}</span> <span class="text-muted">${esc(dates[i])}</span>`, cross: '.mini-cross', hit: '.mini-hit', tip: '.mini-tip' });
+}
+
+/**
+ * 依寬度畫的折線圖（單一 y 軸），附十字線 tooltip：一次列出同一天所有線的數值。
+ * @param {{dates:string[], series:Array<{label,values,color,width?,dash?,area?,endLabel?}>, height?:number, format?:Function}} o
+ */
+function drawLineChart(el, { dates, series: lines, height = 240, format = fmt }) {
+  const W = Math.max(280, el.clientWidth || 600);
+  const H = height;
+  const pad = { l: 56, r: 64, t: 8, b: 24 };
+  const n = dates.length;
+  const all = lines.flatMap((s) => s.values).filter((v) => v !== null && v !== undefined);
+  let min = Math.min(...all);
+  let max = Math.max(...all);
+  const padV = (max - min) * 0.06 || 1;
+  min -= padV; max += padV;
+  const x = (i) => pad.l + (i / Math.max(1, n - 1)) * (W - pad.l - pad.r);
+  const y = (v) => H - pad.b - ((v - min) / (max - min)) * (H - pad.t - pad.b);
+
+  const grid = niceTicks(min, max, 4).map((v) => `
+    <line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="rgb(var(--c-line))" stroke-width="1"/>
+    <text x="${pad.l - 8}" y="${y(v) + 4}" text-anchor="end" font-size="12" fill="rgb(var(--c-muted))">${esc(format(v))}</text>`).join('');
+  const months = dates.map((d, i) => ({ i, m: d.slice(0, 7) })).filter((p, k, arr) => k > 0 && p.m !== arr[k - 1].m);
+  const xTicks = months.map((p) => `<text x="${x(p.i)}" y="${H - 6}" text-anchor="middle" font-size="12" fill="rgb(var(--c-muted))">${Number(p.m.slice(5))}月</text>`).join('');
+  const paths = lines.map((s) => {
+    const d = pathOf(s.values, x, y);
+    const firstIdx = s.values.findIndex((v) => v !== null && v !== undefined);
+    const area = s.area && firstIdx !== -1 ? `<path d="${d}L${x(n - 1).toFixed(1)},${H - pad.b}L${x(firstIdx).toFixed(1)},${H - pad.b}Z" fill="${s.color}" fill-opacity="0.08"/>` : '';
+    return `${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''}/>`;
+  }).join('');
+  const main = lines.find((s) => s.endLabel);
+  const lastV = main?.values[n - 1];
+  const end = main && lastV !== null ? `<circle cx="${x(n - 1)}" cy="${y(lastV)}" r="4" fill="${main.color}" stroke="rgb(var(--c-surface))" stroke-width="2"/>
+    <text x="${x(n - 1) + 8}" y="${y(lastV) + 4}" font-size="12" font-weight="600" fill="rgb(var(--c-ink))">${esc(format(lastV))}</text>` : '';
+
+  el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="block select-none" role="img" aria-label="${esc(lines.map((s) => s.label).join('、'))}走勢">
+    ${grid}${xTicks}${paths}${end}
+    <line class="lc-cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" stroke="rgb(var(--c-faint))" stroke-width="1" visibility="hidden"/>
+    <rect x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" fill="transparent" class="lc-hit"/>
+  </svg>
+  <div class="lc-tip hidden absolute z-10 pointer-events-none bg-surface border border-line rounded-lg shadow-lg px-3 py-2 text-xs num min-w-[9rem]"></div>`;
+
+  bindSimpleHover(el, {
+    n, x, W, pad, cross: '.lc-cross', hit: '.lc-hit', tip: '.lc-tip',
+    row: (i) => `<div class="text-muted mb-1">${esc(dates[i])}</div>${lines.map((s) => `
+      <div class="flex items-center justify-between gap-4"><span class="inline-flex items-center gap-1.5 text-muted">
+        <svg width="12" height="6" aria-hidden="true"><line x1="0" y1="3" x2="12" y2="3" stroke="${s.color}" stroke-width="2"/></svg>${esc(s.label)}</span>
+        <span class="font-medium text-ink">${s.values[i] === null || s.values[i] === undefined ? '—' : esc(format(s.values[i]))}</span></div>`).join('')}`,
+  });
+}
+
+/** 直條圖：最新一根用強調色，其餘灰色（重點是「今天」相對最近的位置） */
+function drawColumns(el, { values, labels, height = 72 }) {
+  const W = Math.max(200, el.clientWidth || 300);
+  const H = height;
+  const n = values.length;
+  const max = Math.max(...values, 1);
+  const slot = W / n;
+  const bw = Math.min(24, Math.max(2, slot - 2));
+  el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="block" role="img" aria-label="近 ${n} 日成交值">
+    ${values.map((v, i) => {
+      const h = Math.max(1, (v / max) * (H - 2));
+      const xx = i * slot + (slot - bw) / 2;
+      const yy = H - h;
+      const r = Math.min(4, bw / 2, h);
+      // 只有頂端圓角、底部貼齊基線
+      return `<path d="M${xx},${H}V${yy + r}Q${xx},${yy} ${xx + r},${yy}H${xx + bw - r}Q${xx + bw},${yy} ${xx + bw},${yy + r}V${H}Z"
+        fill="${i === n - 1 ? series('s1') : 'rgb(var(--c-dim))'}"><title>${esc(labels[i])}</title></path>`;
+    }).join('')}
+  </svg>`;
+}
+
+/** 十字線＋tooltip 的共用綁定：依指標的 x 找最近的一天 */
+function bindSimpleHover(el, { n, x, W, pad, row, cross, hit, tip }) {
+  const svg = el.querySelector('svg');
+  const line = el.querySelector(cross);
+  const box = el.querySelector(tip);
+  const area = el.querySelector(hit);
+  if (!svg || !line || !box || !area) return;
+  const show = (e) => {
+    const rect = svg.getBoundingClientRect();
+    const vx = ((e.clientX - rect.left) / rect.width) * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((vx - pad.l) / (W - pad.l - pad.r)) * (n - 1))));
+    line.setAttribute('x1', x(i)); line.setAttribute('x2', x(i)); line.setAttribute('visibility', 'visible');
+    box.innerHTML = row(i);
+    box.classList.remove('hidden');
+    const px = (x(i) / W) * rect.width;
+    const left = px + 12 + box.offsetWidth > rect.width ? px - 12 - box.offsetWidth : px + 12;
+    box.style.left = `${Math.max(0, left)}px`;
+    box.style.top = '4px';
+  };
+  const hide = () => { line.setAttribute('visibility', 'hidden'); box.classList.add('hidden'); };
+  area.style.touchAction = 'pan-y';
+  area.addEventListener('pointermove', show);
+  area.addEventListener('pointerdown', show);
+  area.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
 }
 
 function renderNews() {
@@ -661,72 +1020,6 @@ function renderRecommend() {
     　候選池 ${r.candidateCount} 檔（已排除已在自選、成交量過低者）。`;
 }
 
-function renderAlerts() {
-  const watch = latest.watchlist;
-  const options = watch;
-
-  const prevCode = $('a-code').value;
-  $('a-code').innerHTML = options.length === 0
-    ? '<option value="">請先加入自選股</option>'
-    : options.map((s) => `<option value="${esc(s.code)}">${esc(s.code)} ${esc(s.name)}</option>`).join('');
-  if (prevCode && options.some((o) => o.code === prevCode)) $('a-code').value = prevCode;
-
-  if (!$('a-type').options.length) {
-    $('a-type').innerHTML = Object.entries(RULE_TYPES)
-      .map(([key, t]) => `<option value="${key}">${esc(t.label)}</option>`).join('');
-    syncRuleValueField();
-  }
-
-  $('alerts-triggered').innerHTML = latest.alerts.triggered.length === 0
-    ? emptyState('目前沒有觸發的提醒', 'bell-slash')
-    : latest.alerts.triggered.map(alertRow).join('');
-
-  const skipped = new Map(latest.alerts.skipped.map((s) => [s.ruleId, s.reason]));
-  $('alerts-rules').innerHTML = profile.rules.length === 0
-    ? emptyState('還沒有設定提醒規則', 'bell')
-    : profile.rules.map((rule) => {
-        const t = RULE_TYPES[rule.type] || { label: rule.type, unit: '' };
-        const stock = latest.watchlist.find((s) => s.code === rule.code);
-        const isSkipped = skipped.has(rule.id);
-        return `<div class="flex items-center gap-2 text-sm py-1.5">
-          <input type="checkbox" data-toggle-rule="${esc(rule.id)}" ${rule.enabled === false ? '' : 'checked'}
-                 class="w-4 h-4 accent-brand-600 shrink-0">
-          <div class="min-w-0 flex-1 ${rule.enabled === false ? 'opacity-50' : ''}">
-            <span class="num">${esc(rule.code)}</span>
-            <span class="text-sub">${esc(stock ? stock.name : '')}</span>
-            <span class="text-muted">${esc(t.label)}</span>
-            ${t.needsValue ? `<span class="num font-medium">${esc(rule.value)}${esc(t.unit)}</span>` : ''}
-            ${isSkipped ? `<div class="text-xs text-warn">無法評估：${esc(skipped.get(rule.id))}</div>` : ''}
-          </div>
-          <button data-remove-rule="${esc(rule.id)}" class="text-faint hover:text-danger px-1 shrink-0">
-            <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-xmark"/></svg>
-          </button>
-        </div>`;
-      }).join('');
-}
-
-function renderDiagnostics() {
-  const d = latest.diagnostics;
-  const rows = [
-    ['模式', d.offline ? '離線（樣本資料）' : '線上'],
-    ['股票宇宙', `${latest.market.total} 檔 · ${d.universeFromCache ? '來自快取' : '即時抓取'}`],
-    ['更新時間', new Date(d.universeUpdatedAt).toLocaleString('zh-TW')],
-  ];
-
-  $('diagnostics').innerHTML = rows.map(([k, v]) => `
-      <div class="flex justify-between gap-3">
-        <span class="text-muted">${esc(k)}</span><span class="num text-right">${esc(v)}</span>
-      </div>`).join('')
-    + (d.sourceErrors.length
-      ? `<div class="pt-2 mt-2 border-t border-line-soft">
-           <div class="text-muted mb-1">來源訊息</div>
-           <ul class="space-y-1 text-xs text-warn list-disc list-inside">
-             ${d.sourceErrors.map((e) => `<li>${esc(e)}</li>`).join('')}
-           </ul>
-         </div>`
-      : '<div class="pt-2 mt-2 border-t border-line-soft text-xs text-ok">所有來源正常</div>');
-}
-
 // ── 技術分析 ─────────────────────────────────────────
 //
 // 跟其他分頁不同，這裡的資料不在 dashboard 回應裡：一檔要抓兩年日 K，
@@ -795,9 +1088,11 @@ async function loadTechnical({ force = false } = {}) {
   }
 }
 
+/** 選項按鈕的樣式（標的、通道長度、顯示區間共用） */
+const chip = (active) => `px-3 py-1.5 text-sm rounded-lg border ${
+  active ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub hover:bg-raised'}`;
+
 function renderTechnicalControls() {
-  const chip = (active) => `px-3 py-1.5 text-sm rounded-lg border ${
-    active ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub hover:bg-raised'}`;
 
   const options = taOptions();
   $('ta-picker').innerHTML = options.length === 0
@@ -830,41 +1125,42 @@ function renderTechnical() {
     ${notes.length ? `<div class="rounded-lg border px-4 py-3 text-sm bg-warn-bg border-warn-line text-warn mb-6">
       <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0 mr-1.5" aria-hidden="true"><use href="#i-warning"/></svg>${notes.map(esc).join('；')}</div>` : ''}
 
-    <div class="grid lg:grid-cols-3 gap-6">
-      ${verdictCard(t)}
-      <div class="lg:col-span-2 bg-surface rounded-xl border border-line">
-        <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center gap-x-4 gap-y-1">
-          <h2 class="font-semibold">K 線與${esc(ch.label)}</h2>
-          <span class="text-xs text-muted num">${esc(ch.startDate)} 起 ${ch.lookback} 日 · 資料至 ${esc(t.asOf)} · ${esc(t.source)}</span>
+    <div class="bg-surface rounded-xl border border-line">
+      <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 class="text-lg font-semibold">${esc(t.name)} <span class="num text-muted font-normal">${esc(t.code)}</span></h2>
+        <span class="text-sm text-sub">K 線與${esc(ch.label)}</span>
+        <span class="text-xs text-muted num">${esc(ch.startDate)} 起 ${ch.lookback} 日 · 資料至 ${esc(t.asOf)}</span>
+        <div class="ml-auto flex gap-1.5" role="group" aria-label="顯示區間">
+          ${TA_RANGES.map(([n, label]) => `<button data-ta-bars="${n}" class="${chip(n === (profile.taBars ?? 120))}">${esc(label)}</button>`).join('')}
         </div>
-        <div class="p-3 sm:p-4">
-          ${chartLegend()}
-          <!-- 手機上圖不縮到看不清楚，改成在卡片內左右捲動 -->
-          ${narrow && chart !== t.chart ? `<p class="text-[11px] text-faint px-1 mb-1">手機版只畫近 ${NARROW_BARS} 個交易日；通道與指標仍以完整資料計算</p>` : ''}
-          <div><div id="ta-charts" class="relative">
-            ${priceChartSvg(chart)}
-            ${oscChartSvg(chart, 'rsi')}
-            ${oscChartSvg(chart, 'kd')}
-            <div id="ta-tip" class="hidden absolute z-10 pointer-events-none bg-surface border border-line rounded-lg shadow-lg px-3 py-2 text-xs num min-w-[10rem]"></div>
-          </div></div>
+      </div>
+      <div class="p-3 sm:p-5">
+        ${chartLegend()}
+        ${chart.bars.length < t.chart.bars.length ? `<p class="text-xs text-faint px-1 mb-1">顯示近 ${chart.bars.length} 個交易日；通道、箱型與指標仍以完整資料計算</p>` : ''}
+        <div id="ta-charts" class="relative">
+          ${priceChartSvg(chart)}
+          ${oscChartSvg(chart, 'rsi')}
+          ${oscChartSvg(chart, 'kd')}
+          <div id="ta-tip" class="hidden absolute z-10 pointer-events-none bg-surface border border-line rounded-lg shadow-lg px-3 py-2 text-xs num min-w-[10rem]"></div>
         </div>
       </div>
     </div>
 
     <div class="grid lg:grid-cols-3 gap-6 mt-6">
-      <div class="lg:col-span-2 bg-surface rounded-xl border border-line">
-        <div class="px-5 py-3.5 border-b border-line-soft flex items-center justify-between">
+      ${verdictCard(t)}
+      ${planCard(t.plan)}
+      ${timeframeCard(a)}
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-6 mt-6">
+      <div class="bg-surface rounded-xl border border-line">
+        <div class="px-5 py-3.5 border-b border-line-soft flex flex-wrap items-center justify-between gap-2">
           <h2 class="font-semibold">判讀依據</h2>
           <span class="text-xs text-muted">每一項都附實際數字，加總即為綜合分數</span>
         </div>
         <ul class="p-5 space-y-2.5">${signalRows(a)}</ul>
       </div>
-      ${timeframeCard(a)}
-    </div>
-
-    <div class="grid lg:grid-cols-3 gap-6 mt-6">
       ${indicatorCard(a)}
-      ${planCard(t.plan)}
     </div>
 
     ${backtestCard(t.backtest)}
@@ -980,7 +1276,7 @@ function indicatorCard(a) {
   const rsiHint = x.rsi === null ? '' : x.rsi < 30 ? '超賣' : x.rsi > 70 ? '超買' : '中性';
   const kdHint = x.k === null ? '' : x.k < 20 ? '低檔' : x.k > 80 ? '高檔' : x.k > x.d ? 'K 在 D 之上' : 'K 在 D 之下';
 
-  return `<div class="lg:col-span-2 bg-surface rounded-xl border border-line">
+  return `<div class="bg-surface rounded-xl border border-line">
     <div class="px-5 py-3.5 border-b border-line-soft"><h2 class="font-semibold">指標數值</h2></div>
     <div class="p-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
       ${tile('RSI(14)', fmt(x.rsi, 1), rsiHint)}
@@ -1108,7 +1404,10 @@ let CHART_W = 800;
 let PAD = { left: 52, right: 88 };
 
 /** 手機寬度：只畫近 n 根，否則 150 根 K 線擠在 300px 裡每根不到 2px */
-const NARROW_BARS = 90;
+const NARROW_BARS = 60;
+
+/** K 線圖的顯示區間（根數，0 = 全部）。根數少，每根 K 線才夠寬看得清楚 */
+const TA_RANGES = [[60, '3 個月'], [120, '6 個月'], [0, '全部']];
 
 function lastBars(c, n) {
   if (c.bars.length <= n) return c;
@@ -1124,27 +1423,27 @@ function lastBars(c, n) {
   };
 }
 
-/** 依畫面寬度決定圖的尺寸，回傳要畫的那段資料 */
+/**
+ * 依容器的實際寬度畫圖（viewBox 寬 = 像素寬），字與線在任何螢幕上都是設定的大小，
+ * 不會因為縮放變細變小。回傳要畫的那段資料。
+ */
 function sizeChart(chart) {
   const narrow = window.matchMedia('(max-width: 639px)').matches;
-  if (!narrow) {
-    CHART_W = 800;
-    PAD = { left: 52, right: 88 };
-    return { chart, narrow };
-  }
-  // 卡片左右 padding（p-3）與邊框約 26px
-  CHART_W = Math.max(300, Math.round(($('ta-body').clientWidth || 360) - 26));
-  PAD = { left: 40, right: 68 };
-  return { chart: lastBars(chart, NARROW_BARS), narrow };
+  // 卡片左右 padding（p-3 / sm:p-5）與邊框
+  const inner = ($('ta-body').clientWidth || 800) - (narrow ? 26 : 42);
+  CHART_W = Math.max(300, Math.round(inner));
+  PAD = narrow ? { left: 44, right: 72 } : { left: 64, right: 104 };
+  const want = narrow ? Math.min(NARROW_BARS, profile.taBars || NARROW_BARS) : profile.taBars ?? 120;
+  return { chart: want > 0 ? lastBars(chart, want) : chart, narrow };
 }
 const series = (n) => `rgb(var(--c-${n}))`;
 
 function chartLegend() {
   const line = (color, label, dash = '') => `<span class="inline-flex items-center gap-1.5">
-    <svg width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" stroke="${color}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''}/></svg>${esc(label)}</span>`;
+    <svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="${color}" stroke-width="2.5" ${dash ? `stroke-dasharray="${dash}"` : ''}/></svg>${esc(label)}</span>`;
   const mark = (shape, color, label, stroke = false) => `<span class="inline-flex items-center gap-1.5">
-    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="${shape}" ${stroke ? `fill="none" stroke="${color}" stroke-width="2"` : `fill="${color}"`}/></svg>${esc(label)}</span>`;
-  return `<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-sub mb-2 px-1">
+    <svg width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><path d="${shape}" ${stroke ? `fill="none" stroke="${color}" stroke-width="2"` : `fill="${color}"`}/></svg>${esc(label)}</span>`;
+  return `<div class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-sub mb-3 px-1">
     ${line(series('s1'), '通道上下緣')}
     ${line(series('s1'), '通道中軌', '4 3')}
     ${line(series('s2'), 'MA20 月線')}
@@ -1189,7 +1488,8 @@ const pathOf = (values, x, y) => {
 };
 
 function priceChartSvg(c) {
-  const H = 320;
+  // 寬螢幕給到 480px 高；手機 360px，搭配較少的根數
+  const H = CHART_W < 640 ? 360 : 480;
   const top = 12;
   const bottom = H - 26;
   const n = c.bars.length;
@@ -1209,25 +1509,25 @@ function priceChartSvg(c) {
 
   const grid = niceTicks(min, max, 5).map((v) => `
     <line x1="${PAD.left}" x2="${CHART_W - PAD.right}" y1="${y(v)}" y2="${y(v)}" stroke="rgb(var(--c-line))" stroke-width="1"/>
-    <text x="${PAD.left - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="rgb(var(--c-muted))">${v >= 1000 ? Math.round(v).toLocaleString('zh-TW') : v}</text>`).join('');
+    <text x="${PAD.left - 6}" y="${y(v) + 4}" text-anchor="end" font-size="12" fill="rgb(var(--c-muted))">${v >= 1000 ? Math.round(v).toLocaleString('zh-TW') : v}</text>`).join('');
 
   // 月份刻度：每個月第一根 K 線
   const months = c.bars.map((b, i) => ({ i, m: b.date.slice(0, 7) }))
     .filter((p, k, arr) => k === 0 || p.m !== arr[k - 1].m).slice(1);
-  const xTicks = months.map((p) => `<text x="${x(p.i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="rgb(var(--c-muted))">${Number(p.m.slice(5))}月</text>`).join('');
+  const xTicks = months.map((p) => `<text x="${x(p.i)}" y="${H - 8}" text-anchor="middle" font-size="12" fill="rgb(var(--c-muted))">${Number(p.m.slice(5))}月</text>`).join('');
 
   const band = chan.length ? `
     <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.upper).toFixed(1)}`).join('')}${[...chan].reverse().map((p) => `L${x(p.i).toFixed(1)},${y(p.lower).toFixed(1)}`).join('')}Z"
-          fill="${series('s1')}" fill-opacity="0.07"/>
-    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.upper).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2"/>
-    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.lower).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2"/>
-    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.mid).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.8"/>` : '';
+          fill="${series('s1')}" fill-opacity="0.08"/>
+    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.upper).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2.5"/>
+    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.lower).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="2.5"/>
+    <path d="${chan.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.mid).toFixed(1)}`).join('')}" fill="none" stroke="${series('s1')}" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.85"/>` : '';
 
   // 箱型：整理中（橘）、已向上突破（紅虛線，放量的標「放量」）、已跌破箱底（灰）
   const boxStyle = {
-    open: { color: series('warn'), fill: 0.1, dash: '', width: 1.6 },
-    breakout: { color: series('up'), fill: 0.06, dash: '5 3', width: 1.4 },
-    failed: { color: series('faint'), fill: 0.06, dash: '2 3', width: 1.2 },
+    open: { color: series('warn'), fill: 0.1, dash: '', width: 2.2 },
+    breakout: { color: series('up'), fill: 0.06, dash: '6 4', width: 2 },
+    failed: { color: series('faint'), fill: 0.06, dash: '2 4', width: 1.8 },
   };
   const boxLabel = { open: '整理中', breakout: '已突破', failed: '已跌破' };
   const boxSvg = boxes.map((b) => {
@@ -1236,7 +1536,7 @@ function priceChartSvg(c) {
     const w = Math.max(step, x(b.i1) + step / 2 - x0);
     const detail = `${b.startDate} ～ ${b.endDate}　箱頂 ${fmt(b.top)}／箱底 ${fmt(b.bottom)}`;
     const tag = b.status === 'breakout'
-      ? `<text x="${(x0 + w).toFixed(1)}" y="${(y(b.top) - 4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="${st.color}">突破${b.volumeConfirmed ? '放量' : '（量不足）'}</text>`
+      ? `<text x="${(x0 + w).toFixed(1)}" y="${(y(b.top) - 4).toFixed(1)}" text-anchor="end" font-size="12" font-weight="600" fill="${st.color}" stroke="rgb(var(--c-surface))" stroke-width="3" paint-order="stroke">突破${b.volumeConfirmed ? '放量' : '（量不足）'}</text>`
       : '';
     return `<g><title>箱型（${boxLabel[b.status] ?? ''}）${detail}</title>
       <rect x="${x0.toFixed(1)}" y="${y(b.top).toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1, y(b.bottom) - y(b.top)).toFixed(1)}"
@@ -1244,12 +1544,12 @@ function priceChartSvg(c) {
       ${tag}</g>`;
   }).join('');
 
-  const bodyW = Math.max(1, step * 0.62);
+  const bodyW = Math.max(1.5, step * 0.7);
   const candles = c.bars.map((b, i) => {
     const color = b.close >= b.open ? series('up') : series('down');
     const yo = y(b.open);
     const yc = y(b.close);
-    return `<line x1="${x(i)}" x2="${x(i)}" y1="${y(b.high)}" y2="${y(b.low)}" stroke="${color}" stroke-width="1"/>
+    return `<line x1="${x(i)}" x2="${x(i)}" y1="${y(b.high)}" y2="${y(b.low)}" stroke="${color}" stroke-width="1.25"/>
       <rect x="${(x(i) - bodyW / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${bodyW.toFixed(1)}" height="${Math.max(1, Math.abs(yo - yc)).toFixed(1)}" fill="${color}"/>`;
   }).join('');
 
@@ -1257,10 +1557,10 @@ function priceChartSvg(c) {
     const i = idx.get(m.date);
     if (i === undefined) return '';
     const cx = x(i);
-    if (m.kind === 'buy') { const cy = y(m.price) + 10; return `<path d="M${cx},${cy - 5}L${cx + 5},${cy + 4}L${cx - 5},${cy + 4}Z" fill="${series('up')}" stroke="rgb(var(--c-surface))" stroke-width="1.5"><title>${m.date} 下緣買點</title></path>`; }
-    if (m.kind === 'sell') { const cy = y(m.price) - 10; return `<path d="M${cx},${cy + 5}L${cx + 5},${cy - 4}L${cx - 5},${cy - 4}Z" fill="${series('down')}" stroke="rgb(var(--c-surface))" stroke-width="1.5"><title>${m.date} 上緣賣訊</title></path>`; }
-    const cy = y(m.price) + 11;
-    return `<path d="M${cx - 4},${cy - 4}L${cx + 4},${cy + 4}M${cx + 4},${cy - 4}L${cx - 4},${cy + 4}" stroke="${series('warn')}" stroke-width="2"><title>${m.date} 跌破通道</title></path>`;
+    if (m.kind === 'buy') { const cy = y(m.price) + 13; return `<path d="M${cx},${cy - 7}L${cx + 7},${cy + 6}L${cx - 7},${cy + 6}Z" fill="${series('up')}" stroke="rgb(var(--c-surface))" stroke-width="1.5"><title>${m.date} 下緣買點</title></path>`; }
+    if (m.kind === 'sell') { const cy = y(m.price) - 13; return `<path d="M${cx},${cy + 7}L${cx + 7},${cy - 6}L${cx - 7},${cy - 6}Z" fill="${series('down')}" stroke="rgb(var(--c-surface))" stroke-width="1.5"><title>${m.date} 上緣賣訊</title></path>`; }
+    const cy = y(m.price) + 14;
+    return `<path d="M${cx - 5},${cy - 5}L${cx + 5},${cy + 5}M${cx + 5},${cy - 5}L${cx - 5},${cy + 5}" stroke="${series('warn')}" stroke-width="2.5"><title>${m.date} 跌破通道</title></path>`;
   }).join('');
 
   // 右側直接標註：最後一根的通道上下緣與均線值，顏色靠線條，文字維持文字色
@@ -1282,17 +1582,17 @@ function priceChartSvg(c) {
   labels.sort((a, b) => y(a.v) - y(b.v));
   let prevY = -Infinity;
   const endLabels = labels.map((l) => {
-    const ly = Math.max(y(l.v) + 4, prevY + 13);
+    const ly = Math.max(y(l.v) + 4, prevY + 16);
     prevY = ly;
-    return `<rect x="${CHART_W - PAD.right + 4}" y="${ly - 7}" width="3" height="8" fill="${l.color}"/>
-      <text x="${CHART_W - PAD.right + 10}" y="${ly}" font-size="10.5" fill="rgb(var(--c-sub))">${esc(l.text)}</text>`;
+    return `<rect x="${CHART_W - PAD.right + 4}" y="${ly - 9}" width="4" height="10" rx="1" fill="${l.color}"/>
+      <text x="${CHART_W - PAD.right + 12}" y="${ly}" font-size="12" fill="rgb(var(--c-sub))">${esc(l.text)}</text>`;
   }).join('');
 
   return `<svg viewBox="0 0 ${CHART_W} ${H}" class="w-full h-auto block select-none" role="img"
       aria-label="${esc(`近 ${n} 個交易日 K 線、趨勢通道、箱型與均線`)}" data-panel="price" data-top="${top}" data-bottom="${bottom}">
     ${grid}${xTicks}${boxSvg}${band}
-    <path d="${pathOf(c.ma60, x, y)}" fill="none" stroke="${series('s3')}" stroke-width="1.5" stroke-dasharray="6 3"/>
-    <path d="${pathOf(c.ma20, x, y)}" fill="none" stroke="${series('s2')}" stroke-width="1.5"/>
+    <path d="${pathOf(c.ma60, x, y)}" fill="none" stroke="${series('s3')}" stroke-width="2" stroke-dasharray="7 4"/>
+    <path d="${pathOf(c.ma20, x, y)}" fill="none" stroke="${series('s2')}" stroke-width="2"/>
     ${candles}${markers}${endLabels}
     <line class="ta-cross" x1="0" x2="0" y1="${top}" y2="${bottom}" stroke="rgb(var(--c-faint))" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
     <rect x="${PAD.left}" y="0" width="${CHART_W - PAD.left - PAD.right}" height="${H}" fill="transparent" class="ta-hit"/>
@@ -1300,8 +1600,8 @@ function priceChartSvg(c) {
 }
 
 function oscChartSvg(c, kind) {
-  const H = 96;
-  const top = 16;
+  const H = CHART_W < 640 ? 100 : 128;
+  const top = 20;
   const bottom = H - 8;
   const n = c.bars.length;
   const { x } = xScale(n);
@@ -1309,24 +1609,24 @@ function oscChartSvg(c, kind) {
   const refs = kind === 'rsi' ? [30, 70] : [20, 80];
   const title = kind === 'rsi' ? 'RSI(14)' : 'KD(9,3,3)';
   const lines = kind === 'rsi'
-    ? `<path d="${pathOf(c.rsi, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="1.5"/>`
-    : `<path d="${pathOf(c.k, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="1.5"/>
-       <path d="${pathOf(c.d, x, y)}" fill="none" stroke="${series('s2')}" stroke-width="1.5"/>`;
+    ? `<path d="${pathOf(c.rsi, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="2"/>`
+    : `<path d="${pathOf(c.k, x, y)}" fill="none" stroke="${series('s1')}" stroke-width="2"/>
+       <path d="${pathOf(c.d, x, y)}" fill="none" stroke="${series('s2')}" stroke-width="2"/>`;
   const lastVals = kind === 'rsi'
     ? [{ v: c.rsi[n - 1], t: 'RSI', color: series('s1') }]
     : [{ v: c.k[n - 1], t: 'K', color: series('s1') }, { v: c.d[n - 1], t: 'D', color: series('s2') }];
   let prevY = -Infinity;
   const endLabels = lastVals.filter((l) => l.v !== null).sort((a, b) => y(a.v) - y(b.v)).map((l) => {
-    const ly = Math.max(y(l.v) + 4, prevY + 12);
+    const ly = Math.max(y(l.v) + 4, prevY + 15);
     prevY = ly;
-    return `<rect x="${CHART_W - PAD.right + 4}" y="${ly - 7}" width="3" height="8" fill="${l.color}"/>
-      <text x="${CHART_W - PAD.right + 10}" y="${ly}" font-size="10.5" fill="rgb(var(--c-sub))">${l.t} ${fmt(l.v, 1)}</text>`;
+    return `<rect x="${CHART_W - PAD.right + 4}" y="${ly - 9}" width="4" height="10" rx="1" fill="${l.color}"/>
+      <text x="${CHART_W - PAD.right + 10}" y="${ly}" font-size="12" fill="rgb(var(--c-sub))">${l.t} ${fmt(l.v, 1)}</text>`;
   }).join('');
 
   return `<svg viewBox="0 0 ${CHART_W} ${H}" class="w-full h-auto block select-none mt-1" role="img" aria-label="${title}" data-panel="${kind}" data-top="${top}" data-bottom="${bottom}">
-    <text x="${PAD.left}" y="11" font-size="11" fill="rgb(var(--c-muted))">${title}</text>
+    <text x="${PAD.left}" y="14" font-size="12" font-weight="600" fill="rgb(var(--c-muted))">${title}</text>
     <rect x="${PAD.left}" y="${y(refs[1])}" width="${CHART_W - PAD.left - PAD.right}" height="${y(refs[0]) - y(refs[1])}" fill="rgb(var(--c-track))" opacity="0.6"/>
-    ${refs.map((r) => `<text x="${PAD.left - 6}" y="${y(r) + 4}" text-anchor="end" font-size="10.5" fill="rgb(var(--c-muted))">${r}</text>`).join('')}
+    ${refs.map((r) => `<text x="${PAD.left - 6}" y="${y(r) + 4}" text-anchor="end" font-size="12" fill="rgb(var(--c-muted))">${r}</text>`).join('')}
     ${lines}${endLabels}
     <line class="ta-cross" x1="0" x2="0" y1="${top}" y2="${bottom}" stroke="rgb(var(--c-faint))" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
     <rect x="${PAD.left}" y="0" width="${CHART_W - PAD.left - PAD.right}" height="${H}" fill="transparent" class="ta-hit"/>
@@ -1422,11 +1722,12 @@ const chipHtml = ([label, cls]) => `<span class="inline-block px-2 py-0.5 rounde
 const yi = (n) => (typeof n === 'number' ? `${n > 0 ? '+' : ''}${(n / 1e8).toFixed(1)} 億` : '—');
 const lots = (n) => (typeof n === 'number' ? `${n > 0 ? '+' : ''}${fmtInt(n / 1000)} 張` : '—');
 
-async function loadRadar({ force = false } = {}) {
+/** quiet：總覽在背景載入時不動產業雷達分頁的畫面 */
+async function loadRadar({ force = false, quiet = false } = {}) {
   if (radarLoading) return;
-  if (radarLatest && !force) return renderRadar();
+  if (radarLatest && !force) return quiet ? undefined : renderRadar();
   radarLoading = true;
-  $('radar-body').innerHTML = `<div class="bg-surface rounded-xl border border-line py-16 text-center text-sm text-muted leading-relaxed">
+  if (!quiet) $('radar-body').innerHTML = `<div class="bg-surface rounded-xl border border-line py-16 text-center text-sm text-muted leading-relaxed">
     正在整理全市場類股成交、法人買賣超、題材新聞與 ${profile.watchlist.length} 檔自選股的月營收…<br>
     <span class="text-faint">第一次約需 1 分鐘（證交所要慢慢抓，避免被擋）；之後歷史資料都有快取，會快很多。</span></div>`;
   try {
@@ -1437,11 +1738,14 @@ async function loadRadar({ force = false } = {}) {
     });
     if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
     radarLatest = await res.json();
-    renderRadar();
+    if (!quiet || $('tab-radar').classList.contains('active')) renderRadar();
   } catch (err) {
+    if (quiet) return;
     $('radar-body').innerHTML = `<div class="rounded-lg border px-4 py-3 text-sm bg-danger-bg border-danger-line text-danger">產業雷達載入失敗：${esc(err.message)}</div>`;
   } finally {
     radarLoading = false;
+    // 總覽的成交值、法人兩張卡要等這份資料
+    if (latest && $('tab-overview').classList.contains('active')) renderMarket();
   }
 }
 
@@ -1698,13 +2002,6 @@ function revenueCard(r) {
 
 // ── 互動 ─────────────────────────────────────────────
 
-function syncRuleValueField() {
-  const type = RULE_TYPES[$('a-type').value];
-  const needs = type?.needsValue !== false;
-  $('a-value-wrap').style.display = needs ? '' : 'none';
-  $('a-unit').textContent = needs && type?.unit ? `(${type.unit})` : '';
-}
-
 function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach((el) => el.classList.remove('active'));
   $(`tab-${name}`)?.classList.add('active');
@@ -1720,6 +2017,8 @@ function switchTab(name) {
 
   if (name === 'technical') loadTechnical();
   if (name === 'radar') loadRadar();
+  // 隱藏時量不到寬度，圖要在切回來時依實際寬度重畫
+  if (name === 'overview' && latest) renderOverview();
 
   // 手機上選完分頁就把浮層選單收起來，否則會一直蓋住內容
   if (window.matchMedia('(max-width: 767px)').matches) closeMobileMenu();
@@ -1753,7 +2052,7 @@ function initEvents() {
     </button>`).join('');
 
   document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-toggle-holding], [data-risk], [data-goal], [data-news-filter], [data-remove-rule], [data-ta-code], [data-ta-lookback], [data-ta-open], [data-flow-view]');
+    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-toggle-holding], [data-risk], [data-goal], [data-news-filter], [data-ta-code], [data-ta-lookback], [data-ta-bars], [data-ta-open], [data-flow-view]');
     if (!target) return;
 
     const d = target.dataset;
@@ -1783,7 +2082,14 @@ function initEvents() {
     if (d.taLookback) {
       profile.taLookback = Number(d.taLookback);
       saveProfile();
+      refresh(); // 總覽的通道判讀用同一個通道長度
       return loadTechnical();
+    }
+
+    if (d.taBars) {
+      profile.taBars = Number(d.taBars);
+      saveLocal();
+      return renderTechnical();
     }
 
     if (d.toggleHolding) {
@@ -1821,24 +2127,8 @@ function initEvents() {
       saveProfile();
       return renderNews();
     }
-
-    if (d.removeRule) {
-      profile.rules = profile.rules.filter((r) => r.id !== d.removeRule);
-      saveProfile();
-      return refresh();
-    }
   });
 
-  document.addEventListener('change', (event) => {
-    const id = event.target.dataset.toggleRule;
-    if (!id) return;
-    const rule = profile.rules.find((r) => r.id === id);
-    if (rule) {
-      rule.enabled = event.target.checked;
-      saveProfile();
-      refresh();
-    }
-  });
 
   // ── 技術分析：自訂代號、資金與風險（輸入框在每次渲染時重建，所以用事件委派）
   const goTechnical = () => {
@@ -1861,6 +2151,7 @@ function initEvents() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (taLatest && $('tab-technical').classList.contains('active')) renderTechnical();
+      if (latest && $('tab-overview').classList.contains('active')) renderOverview();
     }, 200);
   });
   $('ta-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') goTechnical(); });
@@ -1928,147 +2219,8 @@ function initEvents() {
 
   $('search').addEventListener('blur', () => setTimeout(() => $('search-results').classList.add('hidden'), 150));
 
-  // ── 提醒新增
-  $('a-type').addEventListener('change', syncRuleValueField);
-  $('a-add').addEventListener('click', () => {
-    const code = $('a-code').value;
-    const type = $('a-type').value;
-    const meta = RULE_TYPES[type];
-
-    if (!code) return invalid('search', '請先在上方搜尋框加入自選股，才能設定提醒');
-
-    const value = meta.needsValue ? numberFrom('a-value') : null;
-    if (meta.needsValue && !Number.isFinite(value)) return invalid('a-value', `請填入數值（${meta.unit}）`);
-
-    profile.rules.push({
-      id: `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-      code, type, value, enabled: true,
-    });
-    saveProfile();
-    $('a-value').value = '';
-    notify(`已新增提醒：${code} ${meta.label}${meta.needsValue ? ` ${value}${meta.unit}` : ''}`);
-    refresh();
-  });
-
   // 使用者開始修正欄位就拿掉錯誤標記
   document.addEventListener('input', (e) => e.target.removeAttribute?.('aria-invalid'));
-
-  // ── 設定
-  syncSettingsInputs();
-
-  $('s-interval').addEventListener('change', (e) => {
-    profile.refreshSeconds = Math.max(0, Number(e.target.value) || 0);
-    saveProfile(); scheduleRefresh();
-  });
-
-  // 匯出／匯入：以文字面板為主（任何環境都能複製貼上），下載檔案只是附加選項
-  const exportText = () => JSON.stringify(profile, null, 2);
-  $('export').addEventListener('click', () => {
-    const panel = $('export-panel');
-    const opening = panel.classList.contains('hidden');
-    panel.classList.toggle('hidden', !opening);
-    if (opening) {
-      $('export-text').value = exportText();
-      $('export-text').select();
-    }
-  });
-  $('export-close').addEventListener('click', () => $('export-panel').classList.add('hidden'));
-
-  $('export-copy').addEventListener('click', async () => {
-    const text = $('export-text').value || exportText();
-    try {
-      await navigator.clipboard.writeText(text);
-      notify('已複製設定，貼到記事本或訊息裡保存即可');
-    } catch {
-      // 有些環境不給寫剪貼簿：選取文字，讓使用者自己按複製
-      $('export-text').focus();
-      $('export-text').select();
-      notify('無法自動複製，已幫你選取文字，請按「複製」（或 Ctrl／⌘+C）', 'error');
-    }
-  });
-
-  // 展示版會拿掉這顆按鈕（嵌入式預覽不允許下載），所以要容許它不存在
-  $('export-download')?.addEventListener('click', () => {
-    const blob = new Blob([exportText()], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `tw-stock-pulse-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    notify('已開始下載；若沒有出現檔案，代表這個環境不允許下載，請改用「複製」');
-  });
-
-  $('export-apply').addEventListener('click', () => {
-    try {
-      applyProfile(JSON.parse($('export-text').value), '已套用貼上的設定');
-    } catch (err) {
-      invalid('export-text', `套用失敗：${err.message}`);
-    }
-  });
-
-  $('import').addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = ''; // 同一個檔案再選一次也要觸發
-    if (!file) return;
-    try {
-      applyProfile(JSON.parse(await file.text()), `已匯入 ${file.name}`);
-    } catch (err) {
-      notify(`匯入失敗：${err.message}`, 'error');
-    }
-  });
-
-  // 清除全部：按兩次確認（不用 confirm()，嵌入式預覽會直接回傳「取消」）
-  let resetArmed = null;
-  $('reset').addEventListener('click', () => {
-    if (!resetArmed) {
-      $('reset-label').textContent = '再按一次確認清除';
-      resetArmed = setTimeout(() => {
-        resetArmed = null;
-        $('reset-label').textContent = '清除全部';
-      }, 4000);
-      return;
-    }
-    clearTimeout(resetArmed);
-    resetArmed = null;
-    $('reset-label').textContent = '清除全部';
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* 無法存取儲存空間時照樣重設畫面 */ }
-    applyProfile(freshDefaults(), '已清除，回到預設的自選股清單');
-  });
-}
-
-/** 把 profile 的值填回設定頁的輸入框（啟動、匯入、清除後都要同步） */
-function syncSettingsInputs() {
-  $('s-interval').value = profile.refreshSeconds;
-}
-
-/**
- * 套用一份新設定，不重新載入頁面：在無法使用 localStorage 的環境，
- * 重新載入會把剛匯入的設定弄丟。
- */
-function applyProfile(incoming, message) {
-  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
-    throw new Error('內容不是設定格式（應該是 { "watchlist": [...], ... }）');
-  }
-  if (incoming.watchlist !== undefined && !Array.isArray(incoming.watchlist)) {
-    throw new Error('watchlist 必須是代號陣列');
-  }
-  profile = pruneHoldings({ ...freshDefaults(), ...incoming });
-  saveProfile();
-  syncSettingsInputs();
-  applyTheme(profile.theme);
-  scheduleRefresh();
-  taCache.clear();
-  taLatest = null;
-  radarLatest = null;
-  $('export-panel').classList.add('hidden');
-  notify(message);
-  refresh();
-  // 正在看的分頁要用新設定重畫
-  const active = document.querySelector('.tab-content.active')?.id?.replace('tab-', '');
-  if (active === 'technical') { profile.taCode = null; loadTechnical(); }
-  if (active === 'radar') loadRadar();
 }
 
 function scheduleRefresh() {

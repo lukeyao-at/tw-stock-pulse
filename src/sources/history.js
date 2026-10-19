@@ -211,3 +211,14 @@ export async function dailyBars(code, market) {
   const bars = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   return { ...result.value, bars, stale: result.stale, failures };
 }
+
+/** 加權指數日 K（Yahoo ^TWII），總覽的大盤走勢圖用 */
+export async function indexBars(range = '1y') {
+  const result = await cache.through(`history:index:${range}`, TTL.bars, async () => {
+    const url = HISTORY.yahooChart.replace('{symbol}', encodeURIComponent('^TWII')).replace('range=2y', `range=${range}`);
+    const { bars } = parseYahooChart(await fetchJson(url, { headers: { 'User-Agent': HISTORY.yahooUserAgent } }));
+    if (!bars.length) throw new Error('加權指數沒有資料');
+    return bars;
+  });
+  return result.value;
+}

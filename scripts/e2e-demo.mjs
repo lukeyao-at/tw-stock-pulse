@@ -53,11 +53,26 @@ const visibleText = (p, sel) => p.$eval(sel, (e) => e.innerText).catch(() => '')
 const p = await fresh();
 
 // 導覽
-for (const t of ['overview', 'technical', 'radar', 'news', 'recommend', 'alerts', 'settings']) {
+for (const t of ['overview', 'technical', 'radar', 'news', 'recommend']) {
   await tab(p, t);
   check(`分頁：${t}`, await p.$eval(`#tab-${t}`, (e) => e.classList.contains('active')));
 }
 await tab(p, 'overview');
+check('沒有提醒與設定分頁', !(await p.$('[data-tab=alerts], [data-tab=settings], #tab-alerts, #tab-settings')));
+
+// 總覽：市場狀況（加權指數、漲跌家數、產業、法人）→ 持股卡 → 自選股表
+await p.waitForTimeout(600);
+check('總覽依序是市場狀況、持股、自選股',
+  (await p.$$eval('#tab-overview > div > h2', (h) => h.map((e) => e.textContent.trim()))).join('|') === '市場狀況|持股|自選股');
+check('總覽：加權指數走勢圖', await p.isVisible('#ov-index-chart svg path'));
+check('總覽：漲跌家數', /上漲[\s\S]*下跌/.test(await visibleText(p, '#ov-breadth')));
+check('總覽：產業今日漲跌', (await p.$$eval('#ov-sectors li', (l) => l.length)) > 0);
+check('總覽：法人買賣超', (await p.$$eval('#ov-flows li', (l) => l.length)) > 0, await visibleText(p, '#ov-flows'));
+check('總覽：持股卡有走勢圖', (await p.$$eval('#holding-cards [data-mini] svg', (s) => s.length)) === (await p.$$eval('#holding-cards [data-holding-card]', (c) => c.length)));
+check('總覽：自選股列有走勢與通道位置', (await p.$$eval('#watch-table tbody tr svg', (s) => s.length)) > 0
+  && /通道|下緣|中段|上緣/.test(await visibleText(p, '#watch-table')));
+await p.hover('#ov-index-chart .lc-hit', { position: { x: 120, y: 60 } }); await p.waitForTimeout(150);
+check('總覽：滑過指數圖顯示數值', await p.isVisible('#ov-index-chart .lc-tip'));
 
 // 主題
 const th0 = await p.evaluate(() => document.documentElement.dataset.theme || 'system');
@@ -90,6 +105,13 @@ for (const k of [1, 2, 3]) {
   boxesSeen += await p.$$eval('#ta-charts svg[data-panel=price] g title', (t) => t.filter((e) => e.textContent.startsWith('箱型')).length);
 }
 check('K 線圖上畫得出箱型', boxesSeen > 0, `前 3 檔共 ${boxesSeen} 個箱型`);
+const sized = await p.$eval('#ta-charts svg[data-panel=price]', (s) => ({ vb: s.viewBox.baseVal.width, px: s.getBoundingClientRect().width, h: s.getBoundingClientRect().height }));
+check('K 線圖依實際寬度畫、夠大', Math.abs(sized.vb - sized.px) < 2 && sized.h >= 440, JSON.stringify(sized));
+// 每根 K 線一條影線（箱型的方框也是 rect，所以不數 rect）
+const bars6m = await p.$$eval('#ta-charts svg[data-panel=price] line[stroke-width="1.25"]', (r) => r.length);
+await p.click('[data-ta-bars="60"]'); await p.waitForTimeout(400);
+const bars3m = await p.$$eval('#ta-charts svg[data-panel=price] line[stroke-width="1.25"]', (r) => r.length);
+check('K 線圖切換顯示區間', bars3m === 60 && bars6m > bars3m, `${bars6m} → ${bars3m} 根`);
 
 // 技術分析操作
 await p.click('#ta-picker button:nth-child(2)'); await p.waitForTimeout(600);
@@ -132,18 +154,16 @@ check('沒有持股損益分頁', !(await p.$('#tab-holdings')) && !(await p.$('
 await tab(p, 'overview');
 const overviewText = await visibleText(p, '#tab-overview');
 check('總覽沒有損益數字', !/損益|持股市值/.test(overviewText), overviewText.slice(0, 60));
-check('總覽只有持股、自選股兩個區塊',
-  (await p.$$eval('#tab-overview h2', (h) => h.map((e) => e.textContent.trim()))).join('|') === '持股|自選股'
-  && !(await p.$('#kpi-cards, #overview-alerts, #overview-events, #market-movers')));
 
 // 持股：自選股點錢包圖示移到持股，再點一次移回
-const h0 = await p.$$eval('#holding-table tbody tr', (r) => r.length);
+const holdingCount = () => p.$$eval('#holding-cards [data-holding-card]', (r) => r.length);
+const h0 = await holdingCount();
 const w0n = await watchCount(p);
 await p.click('#watch-table [data-toggle-holding]'); await p.waitForTimeout(300);
-check('自選股設為持股', (await p.$$eval('#holding-table tbody tr', (r) => r.length)) === h0 + 1 && (await watchCount(p)) === w0n - 1,
-  `持股 ${h0} → ${await p.$$eval('#holding-table tbody tr', (r) => r.length)}、自選 ${w0n} → ${await watchCount(p)}`);
-await p.click('#holding-table tbody tr:last-child [data-toggle-holding]'); await p.waitForTimeout(300);
-check('持股移回自選股', (await p.$$eval('#holding-table tbody tr', (r) => r.length)) === h0 && (await watchCount(p)) === w0n);
+check('自選股設為持股', (await holdingCount()) === h0 + 1 && (await watchCount(p)) === w0n - 1,
+  `持股 ${h0} → ${await holdingCount()}、自選 ${w0n} → ${await watchCount(p)}`);
+await p.click('#holding-cards [data-holding-card]:last-child [data-toggle-holding]'); await p.waitForTimeout(300);
+check('持股移回自選股', (await holdingCount()) === h0 && (await watchCount(p)) === w0n);
 check('持股設定會存起來', await p.evaluate(() => Array.isArray(profile.holdings)));
 check('設定沒有手續費選項', !(await p.$('#s-fees')) && !(await p.$('#s-discount')));
 
@@ -169,47 +189,6 @@ for (const f of nf) {
 }
 check('新聞：篩選按鈕', filterOk, `${nf.length} 個`);
 
-// 提醒
-await tab(p, 'alerts');
-await p.selectOption('#a-type', 'price_above');
-await p.fill('#a-value', ''); await p.click('#a-add'); await p.waitForTimeout(300);
-check('提醒：漏填數值時看得到提示', /請填入/.test(await visibleText(p, '#toast')) && (await p.evaluate(() => profile.rules.length)) === 0);
-await p.fill('#a-value', '1'); await p.click('#a-add'); await p.waitForTimeout(500);
-const rules = await p.evaluate(() => profile.rules.length);
-check('提醒：新增', rules === 1);
-check('提醒：觸發顯示', (await visibleText(p, '#alerts-triggered')).includes('已高於'));
-await p.click('[data-toggle-rule]'); await p.waitForTimeout(400);
-check('提醒：停用', await p.evaluate(() => profile.rules[0]?.enabled === false));
-await p.click('[data-remove-rule]'); await p.waitForTimeout(400);
-check('提醒：刪除', (await p.evaluate(() => profile.rules.length)) === 0);
-
-// 設定
-await tab(p, 'settings');
-await p.fill('#s-interval', '0'); await p.dispatchEvent('#s-interval', 'change');
-check('設定：更新間隔', await p.evaluate(() => profile.refreshSeconds === 0));
-const dl0 = await p.evaluate(() => window.__downloads);
-await p.click('#export'); await p.waitForTimeout(300);
-const exportVisible = /"watchlist"/.test(await p.inputValue('#export-text').catch(() => '')) && await p.isVisible('#export-panel');
-check('設定：匯出（檢視器裡看得到結果）', exportVisible, (await p.evaluate(() => window.__downloads)) > dl0 ? '只走了下載連結（檢視器擋掉）' : '');
-await p.click('#export-copy'); await p.waitForTimeout(300);
-check('設定：複製有回應', (await visibleText(p, '#toast')).length > 0, await visibleText(p, '#toast'));
-await p.fill('#export-text', JSON.stringify({ watchlist: ['2454'] }));
-await p.click('#export-apply'); await p.waitForTimeout(600);
-check('設定：貼上內容套用', await p.evaluate(() => JSON.stringify(profile.watchlist) === '["2454"]') && (await watchCount(p)) === 1);
-await p.click('#export'); await p.fill('#export-text', '{壞掉的 json'); await p.click('#export-apply'); await p.waitForTimeout(300);
-check('設定：貼上壞掉的內容有錯誤提示', /套用失敗/.test(await visibleText(p, '#toast')));
-// 匯入
-const json = JSON.stringify({ watchlist: ['2330', '2317'], holdings: [], rules: [] });
-await p.setInputFiles('#import', { name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(json) });
-await p.waitForTimeout(800);
-check('設定：匯入檔案', await p.evaluate(() => JSON.stringify(profile.watchlist) === '["2330","2317"]').catch(() => false));
-// 清除
-await p.click('#reset'); await p.waitForTimeout(300);
-check('設定：清除第一次只是確認', (await visibleText(p, '#reset')).includes('再按一次') && (await p.evaluate(() => profile.watchlist.length)) === 2);
-await p.click('#reset'); await p.waitForTimeout(800);
-const afterReset = await p.evaluate(() => profile.watchlist.length).catch(() => -1);
-const shown = (await watchCount(p)) + (await p.$$eval('#holding-table tbody tr', (r) => r.length));
-check('設定：清除全部（不靠 confirm）', afterReset === await p.evaluate(() => DEFAULT_WATCHLIST.length) && shown === afterReset, `清除後清單 ${afterReset} 檔、畫面持股＋自選 ${shown} 檔`);
 check('沒有呼叫任何 alert/confirm', (await p.evaluate(() => window.__dialogs.length)) === 0, JSON.stringify(await p.evaluate(() => window.__dialogs)));
 check('沒有 JS 錯誤', p.errs.length === 0, p.errs.join(' | '));
 
@@ -239,9 +218,6 @@ check('手機選單點背景關閉', !(await m.isVisible('aside')));
   const box = await t.locator('#ta-charts svg').first().boundingBox();
   await t.touchscreen.tap(box.x + box.width * 0.6, box.y + box.height * 0.5); await t.waitForTimeout(400);
   check('手機：點 K 線顯示數值', await t.isVisible('#ta-tip'));
-  await t.tap('#mobile-menu'); await t.waitForTimeout(200); await t.tap('[data-tab=settings]');
-  await t.tap('#reset'); await t.tap('#reset'); await t.waitForTimeout(600);
-  check('手機：清除全部', (await t.isVisible('#toast')) && (await t.$eval('#toast', (e) => e.innerText)).includes('已清除'));
   await ctx.close();
 }
 

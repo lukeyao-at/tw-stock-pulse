@@ -84,6 +84,14 @@ if (Object.keys(barsByCode).length < Math.ceil(targets.length / 2)) {
   process.exit(1);
 }
 
+// ── 加權指數（總覽的大盤走勢圖；抓不到只少一張圖，不擋快照）
+let indexBars = null;
+try {
+  indexBars = await history.indexBars('1y');
+} catch (err) {
+  log(`⚠ 加權指數：${err.message}`);
+}
+
 // ── 新聞（個股新聞一次最多 20 檔）
 const news = [];
 for (let i = 0; i < targets.length; i += 20) {
@@ -137,6 +145,7 @@ const html = buildPage({
   events,
   barsByCode,
   radar,
+  index: indexBars,
   meta: { asOf, generatedAt: new Date().toISOString(), watchlist: codes, watchlistSource },
   transformAppJs: useSnapshotWatchlist,
   title: '台股脈動',
@@ -146,4 +155,4 @@ mkdirSync(path.join(ROOT, 'snapshot'), { recursive: true });
 const out = path.join(ROOT, 'snapshot/index.html');
 writeFileSync(out, html);
 const mb = (Buffer.byteLength(html) / 1024 / 1024).toFixed(2);
-console.log(`snapshot/index.html 已產生 · ${mb} MB · 資料至 ${asOf} · 自選股來源：${watchlistSource} · ${uni.stocks.length} 檔個股 · 日 K ${Object.keys(barsByCode).length} 檔 · 新聞 ${uniqueNews.length} 則 · 事件 ${events.length} 筆 · 產業雷達 ${radar?.ok ? '有' : '無'}`);
+console.log(`snapshot/index.html 已產生 · ${mb} MB · 資料至 ${asOf} · 自選股來源：${watchlistSource} · ${uni.stocks.length} 檔個股 · 日 K ${Object.keys(barsByCode).length} 檔 · 新聞 ${uniqueNews.length} 則 · 事件 ${events.length} 筆 · 產業雷達 ${radar?.ok ? '有' : '無'} · 加權指數 ${indexBars ? '有' : '無'}`);

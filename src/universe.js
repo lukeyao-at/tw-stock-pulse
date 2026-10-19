@@ -24,6 +24,27 @@ async function loadSample() {
   return JSON.parse(raw);
 }
 
+/**
+ * 證交所與櫃買中心公司基本資料的「產業別」是兩碼代碼（例如 24 = 半導體業），
+ * 兩個市場共用同一套。換成名稱，畫面與產業統計才看得懂；認不得的代碼原樣保留。
+ */
+const INDUSTRY_NAMES = {
+  '01': '水泥工業', '02': '食品工業', '03': '塑膠工業', '04': '紡織纖維', '05': '電機機械',
+  '06': '電器電纜', '08': '玻璃陶瓷', '09': '造紙工業', '10': '鋼鐵工業', '11': '橡膠工業',
+  '12': '汽車工業', '14': '建材營造業', '15': '航運業', '16': '觀光餐旅', '17': '金融保險業',
+  '18': '貿易百貨業', '19': '綜合', '20': '其他業', '21': '化學工業', '22': '生技醫療業',
+  '23': '油電燃氣業', '24': '半導體業', '25': '電腦及週邊設備業', '26': '光電業', '27': '通信網路業',
+  '28': '電子零組件業', '29': '電子通路業', '30': '資訊服務業', '31': '其他電子業', '32': '文化創意業',
+  '33': '農業科技業', '34': '電子商務業', '35': '綠能環保', '36': '數位雲端', '37': '運動休閒',
+  '38': '居家生活', '80': '管理股票', '91': '存託憑證',
+};
+
+export const industryName = (raw) => {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const key = String(raw).trim().padStart(2, '0');
+  return INDUSTRY_NAMES[key] ?? String(raw).trim();
+};
+
 /** 把 valuations / profiles 的 Map 疊到行情列上 */
 function enrich(quotes, valuationMaps, profileMaps) {
   return quotes.map((q) => {
@@ -34,7 +55,7 @@ function enrich(quotes, valuationMaps, profileMaps) {
       peRatio: valuation.peRatio ?? null,
       dividendYield: valuation.dividendYield ?? null,
       pbRatio: valuation.pbRatio ?? null,
-      industry: profile.industry ?? null,
+      industry: industryName(profile.industry),
     };
   });
 }
@@ -91,7 +112,8 @@ export async function load() {
     return { stocks, degraded: notes.length > 0, notes, updatedAt: new Date().toISOString() };
   });
 
-  const value = result.value;
+  // 快取裡可能還是舊版存的產業代碼，取出時一律換成名稱（已經是名稱的不受影響）
+  const value = { ...result.value, stocks: result.value.stocks.map((s) => ({ ...s, industry: industryName(s.industry) })) };
   return {
     ...value,
     byCode: new Map(value.stocks.map((s) => [s.code, s])),

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   sma, ema, rsi, kd, macd, atr, indicators,
   fitChannel, locate, evaluateAt, tradePlan, backtest, report, ROUND_TRIP_COST,
-  detectBoxes, backtestBox,
+  detectBoxes, backtestBox, quickStatus,
 } from '../src/technical.js';
 import { sampleBars } from '../src/sample-bars.js';
 import { parseYahooChart, parseMonthRows } from '../src/sources/history.js';
@@ -342,6 +342,24 @@ test('backtest 會一併回報箱型突破策略，且結果確定', () => {
   assert.deepEqual(a, backtest(bars, { lookback: 120 }));
   for (const key of ['channel', 'confirmed', 'box', 'boxTrend']) assert.ok(a.strategies[key], key);
   assert.ok(a.strategies.box.count >= a.strategies.boxTrend.count, '多一道濾網，交易不會變多');
+});
+
+test('quickStatus：總覽的精簡判讀與走勢小圖資料', () => {
+  const bars = channelBars(300, { amp: 10 });
+  const q = quickStatus(bars, { lookback: 120, sparkDays: 60 });
+  assert.ok(q);
+  assert.equal(q.asOf, bars.at(-1).date);
+  assert.equal(q.spark.closes.length, 60);
+  assert.equal(q.spark.upper.length, 60);
+  assert.ok(['up', 'down', 'range'].includes(q.trend));
+  assert.ok(q.upper > q.lower);
+  assert.ok(Array.isArray(q.flags));
+  // 與完整報告的判讀一致
+  const r = report(bars, { lookback: 120 });
+  assert.equal(q.verdict.key, r.analysis.verdict.key);
+  assert.equal(q.zone, r.analysis.location.zone);
+  if (q.box) assert.ok(q.box.start >= 0 && q.box.end < 60 && q.box.start <= q.box.end);
+  assert.equal(quickStatus(bars.slice(0, 100), { lookback: 120 }), null, '資料不足回 null');
 });
 
 // ── 模擬資料與來源解析

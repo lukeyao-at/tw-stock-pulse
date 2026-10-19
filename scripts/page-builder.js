@@ -61,17 +61,19 @@ const slimStock = ({ transactions, ...s }) => s;
  * @param {Array|null} o.events 事件；null 時用以今天為基準的樣本事件
  * @param {Record<string, Array>|null} o.barsByCode 日 K；null 時用模擬 K 線
  * @param {object|null} o.radar 產業雷達的回應
+ * @param {Array|null} [o.index] 加權指數日 K；null 時展示版用模擬走勢
  * @param {{asOf?:string, generatedAt?:string}} [o.meta] 快照的資料日期與產生時間
  * @param {(appJs:string)=>string} [o.transformAppJs] 調整內嵌的 app.js（展示版用來縮減預設自選股）
  * @param {string} [o.title]
  */
-export function buildPage({ mode, stocks, news, events = null, barsByCode = null, radar = null, meta = {}, transformAppJs = (s) => s, title }) {
+export function buildPage({ mode, stocks, news, events = null, barsByCode = null, radar = null, index = null, meta = {}, transformAppJs = (s) => s, title }) {
   const modules = [
     wrapModule('Sentiment', read('src/sentiment.js')),
     wrapModule('Match', read('src/match.js')),
     wrapModule('Recommend', read('src/recommend.js')),
     wrapModule('Alerts', read('src/alerts.js')),
     wrapModule('Technical', read('src/technical.js')),
+    wrapModule('Market', read('src/market.js')),
     wrapModule('SampleBars', read('src/sample-bars.js')),
     extractSearch(),
   ].join('\n\n');
@@ -93,8 +95,34 @@ const NEWS = ${JSON.stringify(news)};
 const EVENTS = ${JSON.stringify(events)};
 const BARS = ${JSON.stringify(bars)};
 const RADAR_SNAPSHOT = ${JSON.stringify(radar)};
+const INDEX = ${JSON.stringify(index ? packBars(index) : null)};
 const BY_CODE = new Map(STOCKS.map((s) => [s.code, s]));
 const ALL_NAMES = STOCKS.map((s) => s.name).filter(Boolean);
+
+const unpack = (rows) => rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+
+/** 某檔的日 K：快照用打包好的真實資料，展示版用模擬產生器；沒有就回 null */
+function barsFor(code) {
+  if (BARS) return BARS[code] ? unpack(BARS[code]) : null;
+  const stock = BY_CODE.get(code);
+  return stock ? SampleBars.sampleBars(code, { close: stock.close, volume: stock.volume }) : null;
+}
+
+/** 總覽每檔的精簡判讀。日 K 是固定的，同一檔、同一個通道長度只算一次 */
+const statusCache = new Map();
+function statusFor(code, lookback) {
+  const key = code + '|' + lookback;
+  if (!statusCache.has(key)) {
+    const bars = barsFor(code);
+    statusCache.set(key, bars ? Technical.quickStatus(bars, { lookback }) : null);
+  }
+  return statusCache.get(key);
+}
+
+/** 加權指數：快照用真實資料；展示版沒有，用模擬走勢讓版面完整 */
+const indexInfo = INDEX
+  ? Technical.indexSummary(unpack(INDEX))
+  : MODE === 'demo' ? Technical.indexSummary(SampleBars.sampleBars('TWII', { close: 23000, volume: 6e9 })) : null;
 
 /** 樣本事件（展示版）：以今天為基準往後排，讓事件提醒也能實際觸發 */
 function sampleEvents(watchlist) {
@@ -138,6 +166,7 @@ function buildDashboard(body) {
       pbRatio: s?.pbRatio ?? null, priceSource: '收盤',
       newsCount: personalized.filter((n) => n.matchedSymbols.some((m) => m.code === w.code)).length,
       unknown: !s,
+      ta: statusFor(w.code, Number(body.lookback) || 120),
     };
   });
 
@@ -170,6 +199,8 @@ function buildDashboard(body) {
     alerts,
     events: upcoming,
     market: {
+      index: indexInfo,
+      summary: Market.marketSummary(STOCKS),
       total: STOCKS.length,
       gainers: STOCKS.filter((s) => (s.changePercent ?? 0) > 0).length,
       losers: STOCKS.filter((s) => (s.changePercent ?? 0) < 0).length,
@@ -214,7 +245,7 @@ function buildTechnical(params) {
           : \`查無代號 \${code}\`,
       };
     }
-    const bars = rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+    const bars = unpack(rows);
     return { ...base, source: \`Yahoo 日 K（\${snapshotNote()}）\`, sample: false, notes: [], ...Technical.report(bars, opts) };
   }
 

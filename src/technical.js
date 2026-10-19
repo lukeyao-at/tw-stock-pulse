@@ -818,6 +818,105 @@ function summarizeTrades(trades, limit) {
   };
 }
 
+/**
+ * 大盤摘要：最新收盤、漲跌，與走勢圖用的近 days 日收盤與月線、季線。
+ * @returns {null | {date, close, change, changePercent, series:Array<{date, close, ma20, ma60}>}}
+ */
+export function indexSummary(bars, days = 120) {
+  const clean = (bars ?? []).filter((b) => b && isNum(b.close) && b.close > 0);
+  if (clean.length < 2) return null;
+  const closes = clean.map((b) => b.close);
+  const ma20 = sma(closes, 20);
+  const ma60 = sma(closes, 60);
+  const last = clean.length - 1;
+  const from = Math.max(0, clean.length - days);
+  return {
+    date: clean[last].date,
+    close: round(closes[last], 2),
+    change: round(closes[last] - closes[last - 1], 2),
+    changePercent: round((closes[last] / closes[last - 1] - 1) * 100, 2),
+    series: clean.slice(from).map((b, k) => ({
+      date: b.date, close: round(b.close, 2), ma20: round(ma20[from + k], 2), ma60: round(ma60[from + k], 2),
+    })),
+  };
+}
+
+// ── 對外：總覽用的精簡判讀 ─────────────────────────────
+
+/**
+ * 一檔股票「現在」的狀態：在通道哪裡、箱型怎樣、今天有沒有該注意的事，
+ * 外加畫走勢小圖的資料。總覽一次要算二、三十檔，所以不跑回測。
+ *
+ * @param {Array} bars 由舊到新的日 K
+ * @param {{lookback?:number, sparkDays?:number}} opts
+ * @returns {null | object} 資料不足時回 null
+ */
+export function quickStatus(bars, { lookback = 120, sparkDays = 60 } = {}) {
+  const clean = (bars ?? []).filter((b) => b && [b.open, b.high, b.low, b.close].every(isNum) && b.close > 0);
+  const lb = clamp(Math.round(Number(lookback) || 120), 30, 240);
+  if (clean.length < lb + 2) return null;
+
+  const ind = indicators(clean);
+  const i = clean.length - 1;
+  const ev = evaluateAt(clean, ind, i, lb);
+  if (!ev) return null;
+  const ch = ev.channel;
+  const plan = tradePlan(ev, ind.atr[i]);
+
+  // 箱型：還在整理的那一個；沒有的話，最近 5 天內剛突破或剛跌破的那一個
+  const { list } = detectBoxes(clean);
+  const last = list.at(-1);
+  const recent = last && (last.status === 'open' || i - last.endIdx <= 5) ? last : null;
+  const from = Math.max(0, clean.length - sparkDays);
+  const box = recent ? {
+    status: recent.status,
+    top: round(recent.top, 2),
+    bottom: round(recent.bottom, 2),
+    daysAgo: recent.endIdx === null ? null : i - recent.endIdx,
+    volumeConfirmed: recent.status === 'breakout' && ind.volMa20[recent.endIdx]
+      ? clean[recent.endIdx].volume >= ind.volMa20[recent.endIdx] * BOX_VOLUME : null,
+    // 在小圖上的起訖位置（相對於小圖的第一根）
+    start: Math.max(recent.topIdx, from) - from,
+    end: (recent.endIdx ?? i) - from,
+  } : null;
+
+  // 今天值得注意的事，依重要性排列；顏色由前端依 tone 決定
+  const flags = [];
+  const { zone } = ev.location;
+  if (zone === 'breakdown' && ch.trend !== 'down') flags.push({ tone: 'down', text: `跌破${ch.label}下緣` });
+  if (box?.status === 'failed' && box.daysAgo === 0) flags.push({ tone: 'down', text: '今天跌破箱底' });
+  if (zone === 'lower' && ch.trend !== 'down') flags.push({ tone: 'up', text: '回測通道下緣（買點區）' });
+  if (box?.status === 'breakout' && box.daysAgo <= 1) flags.push({ tone: 'up', text: `箱型突破${box.volumeConfirmed ? '・放量' : '・量不足'}` });
+  if (zone === 'upper' || zone === 'breakout') flags.push({ tone: 'neutral', text: zone === 'upper' ? '接近通道上緣' : '衝出通道上緣' });
+
+  const spark = clean.slice(from);
+  const lineAt = (j) => (j >= ch.start ? ch.line(j) : null);
+  return {
+    asOf: clean[i].date,
+    close: round(clean[i].close, 2),
+    changePercent: round((clean[i].close / clean[i - 1].close - 1) * 100, 2),
+    lookback: lb,
+    trend: ch.trend,
+    trendLabel: ch.label,
+    zone,
+    position: ev.location.position,
+    lower: round(ch.lower, 2),
+    upper: round(ch.upper, 2),
+    verdict: ev.verdict,
+    score: ev.score,
+    stop: plan?.stop ?? null,
+    target: plan?.target2 ?? null,
+    box,
+    flags,
+    spark: {
+      dates: spark.map((b) => b.date),
+      closes: spark.map((b) => round(b.close, 2)),
+      upper: spark.map((_, k) => { const v = lineAt(from + k); return v ? round(v.upper, 2) : null; }),
+      lower: spark.map((_, k) => { const v = lineAt(from + k); return v ? round(v.lower, 2) : null; }),
+    },
+  };
+}
+
 // ── 對外：完整報告 ────────────────────────────────────
 
 /** 多週期比較用的通道長度（約一個半月、一季、半年、一年） */

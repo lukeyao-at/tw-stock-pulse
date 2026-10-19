@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { search } from '../src/universe.js';
+import { search, industryName } from '../src/universe.js';
 
 const { stocks } = JSON.parse(
   readFileSync(new URL('../data/sample-universe.json', import.meta.url), 'utf8'),
@@ -40,4 +40,12 @@ test('查無結果與空字串', () => {
 
 test('回傳數量有上限', () => {
   assert.ok(search(stocks, '2', 3).length <= 3);
+});
+
+test('產業代碼換成名稱；已是名稱或認不得的原樣保留', () => {
+  assert.equal(industryName('24'), '半導體業');
+  assert.equal(industryName('1'), '水泥工業');
+  assert.equal(industryName('金融保險業'), '金融保險業');
+  assert.equal(industryName('99'), '99');
+  assert.equal(industryName(null), null);
 });
