@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   sma, ema, rsi, kd, macd, atr, indicators,
   fitChannel, locate, evaluateAt, tradePlan, backtest, report, ROUND_TRIP_COST,
+  detectBoxes, backtestBox,
 } from '../src/technical.js';
 import { sampleBars } from '../src/sample-bars.js';
 import { parseYahooChart, parseMonthRows } from '../src/sources/history.js';
@@ -224,6 +225,96 @@ test('通道長度會被限制在 30～240', () => {
   const bars = channelBars(400);
   assert.equal(report(bars, { lookback: 5 }).lookback, 30);
   assert.equal(report(bars, { lookback: 9999 }).lookback, 240);
+});
+
+// ── 箱型突破
+
+const mk = (open, high, low, close, volume = 1000) => ({ open, high, low, close, volume });
+const dated = (bars) => bars.map((b, i) => ({ ...b, date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10) }));
+
+/** 手造一個箱子：箱頂 110、箱底 100，第 6 根收盤確認，第 7 根收盤突破 */
+function boxPattern(breakoutClose = 112) {
+  return dated([
+    mk(100, 105, 100, 103), mk(103, 110, 102, 108), mk(108, 108, 101, 105), mk(105, 107, 100, 104),
+    mk(104, 109, 101, 106), mk(106, 108, 102, 105), mk(105, 108, 101, 105),
+    mk(106, 113, 106, breakoutClose),
+  ]);
+}
+
+test('箱型偵測：箱頂、箱底各連續 3 根沒被突破才成立，收盤站上箱頂才算突破', () => {
+  const { breakout, confirmed } = detectBoxes(boxPattern(), 3);
+  assert.deepEqual(confirmed.map((c) => c !== null), [false, false, false, false, false, false, true, false]);
+  assert.equal(confirmed[6].top, 110);
+  assert.equal(confirmed[6].bottom, 100);
+  assert.equal(breakout[7].top, 110);
+  assert.equal(breakout.filter(Boolean).length, 1);
+});
+
+test('箱型偵測：盤中穿過箱頂但收盤沒站上，不算突破；收盤跌破箱底則箱子失效', () => {
+  const spike = detectBoxes(boxPattern(109), 3);          // 高點 113 > 110，但收 109
+  assert.equal(spike.breakout.filter(Boolean).length, 0);
+
+  const bars = boxPattern();
+  bars[7] = { ...dated([mk(104, 105, 96, 98)])[0], date: bars[7].date };  // 收盤 98 < 箱底 100
+  const dead = detectBoxes(bars, 3);
+  assert.equal(dead.breakout.filter(Boolean).length, 0);
+});
+
+test('箱型偵測沒有未來資料：截掉後面的 K 線，之前的結果完全一樣', () => {
+  const bars = channelBars(300, { amp: 10 });
+  const full = detectBoxes(bars);
+  const cut = detectBoxes(bars.slice(0, 200));
+  assert.ok(full.confirmed.filter(Boolean).length >= 3, '應該要偵測到多個箱子');
+  assert.deepEqual(cut.breakout, full.breakout.slice(0, 200));
+  assert.deepEqual(cut.confirmed, full.confirmed.slice(0, 200));
+});
+
+/** 前面 25 根低檔整理，接著上面的箱子，放量突破後隔天開盤 112 進場 */
+function boxTradeBars(after) {
+  const flat = Array.from({ length: 25 }, () => mk(87, 90, 85, 88));
+  const box = boxPattern(112).map((b, i) => (i === 7 ? { ...b, volume: 3000 } : b));
+  return dated([...flat, ...box.map(({ date, ...b }) => b), ...after]);
+}
+
+test('箱型突破回測：放量突破、隔天開盤進場、跌破箱底出場、扣成本', () => {
+  const bars = boxTradeBars([mk(112, 118, 111, 117), mk(117, 120, 115, 119), mk(119, 119, 90, 92)]);
+  const ind = indicators(bars);
+  const trades = backtestBox(bars, ind, detectBoxes(bars), { warmup: 25 });
+  assert.equal(trades.length, 1);
+  const [t] = trades;
+  assert.equal(t.entry, 112, '突破隔天開盤價');
+  assert.equal(t.exit, 100, '停損在突破的箱底');
+  assert.equal(t.reason, '跌破箱底');
+  assert.ok(near(t.returnPct / 100, 100 / 112 - 1 - ROUND_TRIP_COST, 0.0002));
+});
+
+test('箱型突破回測：沒有放量就不進場', () => {
+  const bars = boxTradeBars([mk(112, 118, 111, 117)]);
+  bars[32] = { ...bars[32], volume: 1000 };
+  const trades = backtestBox(bars, indicators(bars), detectBoxes(bars), { warmup: 25 });
+  assert.equal(trades.length, 0);
+});
+
+test('箱型突破回測：出現更高的新箱子，停損上移到新箱底', () => {
+  const rise = [
+    mk(112, 118, 111, 117), mk(117, 120, 115, 119),
+    mk(119, 118, 114, 116), mk(116, 117, 113, 115), mk(115, 116, 112, 114),
+    mk(114, 116, 113, 114), mk(114, 115, 113, 114), mk(114, 115, 113, 114),   // 第 15 根收盤：箱頂 120、箱底 112 成立
+    mk(114, 114, 105, 106),                                                    // 下一天崩跌
+  ];
+  const bars = boxTradeBars(rise);
+  const trades = backtestBox(bars, indicators(bars), detectBoxes(bars), { warmup: 25 });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exit, 112, '停損已從 100 上移到新箱底 112');
+  assert.equal(trades[0].reason, '跌破箱底');
+});
+
+test('backtest 會一併回報箱型突破策略，且結果確定', () => {
+  const bars = channelBars(400, { amp: 10 });
+  const a = backtest(bars, { lookback: 120 });
+  assert.deepEqual(a, backtest(bars, { lookback: 120 }));
+  for (const key of ['channel', 'confirmed', 'box', 'boxTrend']) assert.ok(a.strategies[key], key);
+  assert.ok(a.strategies.box.count >= a.strategies.boxTrend.count, '多一道濾網，交易不會變多');
 });
 
 // ── 模擬資料與來源解析
