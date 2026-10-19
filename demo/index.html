@@ -1601,7 +1601,7 @@ const STRATEGIES = {
  * 出場：跌破停損（下緣 − 1 ATR）、碰到進場時的通道上緣、或持有滿 maxHold 天。
  * 停損與目標同一天都碰到時，保守地當作先停損。
  */
-function backtest(bars, { lookback = 120, maxHold = 40, tradeLimit = 12, ind = indicators(bars) } = {}) {
+function backtest(bars, { lookback = 120, maxHold = 40, boxMaxHold = 120, tradeLimit = 12, ind = indicators(bars) } = {}) {
   const warmup = Math.max(lookback + 1, 61);
   const results = {};
 
@@ -1645,6 +1645,18 @@ function backtest(bars, { lookback = 120, maxHold = 40, tradeLimit = 12, ind = i
     results[key] = { label: strat.label, ...summarizeTrades(trades, tradeLimit) };
   }
 
+  // 箱型突破與通道下緣買進並排比較：同一段期間、同樣的成本
+  const boxes = detectBoxes(bars);
+  const boxOpts = { warmup, maxHold: boxMaxHold };
+  results.box = {
+    label: '箱型突破：收盤站上箱頂＋放量',
+    ...summarizeTrades(backtestBox(bars, ind, boxes, boxOpts), tradeLimit),
+  };
+  results.boxTrend = {
+    label: '箱型突破＋多頭排列（站上季線）',
+    ...summarizeTrades(backtestBox(bars, ind, boxes, { ...boxOpts, trendFilter: true }), tradeLimit),
+  };
+
   const first = bars[warmup]?.close;
   const last = bars[bars.length - 1]?.close;
   return {
@@ -1652,10 +1664,145 @@ function backtest(bars, { lookback = 120, maxHold = 40, tradeLimit = 12, ind = i
     to: bars[bars.length - 1]?.date ?? null,
     lookback,
     maxHold,
+    boxMaxHold,
     costPct: round(ROUND_TRIP_COST * 100, 3),
     buyHoldPct: first && last ? round((last / first - 1) * 100, 2) : null,
     strategies: results,
   };
+}
+
+// ── 箱型突破（達華斯）─────────────────────────────────
+
+/** 箱頂、箱底各需「連續幾根沒被突破」才算確認（達華斯原版用 3） */
+const BOX_CONFIRM = 3;
+/** 突破要放量：成交量至少是 20 日均量的幾倍 */
+const BOX_VOLUME = 1.5;
+
+/**
+ * 逐根偵測達華斯箱型，只用「當根以前」的 K 線，沒有未來資料。
+ *
+ *  1. 箱頂：一個高點連續 k 根沒被超過 → 確認；中途出現更高的高點就重找
+ *  2. 箱底：箱頂確認後，其後的最低點連續 k 根沒被跌破 → 確認，箱子成立。
+ *     中途又創新高，箱頂重找、箱底歸零
+ *  3. 箱子成立後：收盤站上箱頂 = 突破；收盤跌破箱底 = 失效。
+ *     兩者都用收盤，盤中影線穿過不算。突破或失效後重新找下一個箱子，
+ *     突破那根的最高點成為下一個候選箱頂
+ *
+ * @returns {{breakout:Array, confirmed:Array}} 與 bars 等長：
+ *   breakout[i] = 第 i 根收盤突破了哪個箱子；confirmed[i] = 第 i 根收盤時新成立的箱子
+ */
+function detectBoxes(bars, k = BOX_CONFIRM) {
+  const breakout = new Array(bars.length).fill(null);
+  const confirmed = new Array(bars.length).fill(null);
+  let box = null;
+  let top = null;
+  let topIdx = -1;
+  let topDone = false;
+  let bot = null;
+  let botIdx = -1;
+
+  const restart = (i) => {
+    top = bars[i].high;
+    topIdx = i;
+    topDone = false;
+    bot = null;
+    botIdx = -1;
+  };
+
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+
+    if (box) {
+      if (b.close > box.top) {
+        breakout[i] = box;
+        box = null;
+        restart(i);
+      } else if (b.close < box.bottom) {
+        box = null;
+        restart(i);
+      }
+      continue;
+    }
+
+    if (top === null) { restart(i); continue; }
+    if (b.high > top) { restart(i); continue; }
+
+    if (!topDone) {
+      if (i - topIdx >= k) {
+        topDone = true;
+        bot = Infinity;
+        for (let j = topIdx + 1; j <= i; j++) {
+          if (bars[j].low < bot) { bot = bars[j].low; botIdx = j; }
+        }
+      }
+      continue;
+    }
+
+    if (b.low < bot) {
+      bot = b.low;
+      botIdx = i;
+    } else if (i - botIdx >= k && top > bot) {
+      box = { top, bottom: bot, topDate: bars[topIdx].date, since: bars[i].date };
+      confirmed[i] = box;
+    }
+  }
+  return { breakout, confirmed };
+}
+
+/**
+ * 箱型突破回測。
+ *
+ * 進場：箱子成立後，某天「收盤站上箱頂」且「成交量 ≥ 20 日均量 × 1.5」，
+ *       隔天開盤買進。trendFilter 另外要求收盤在季線之上、月線高於季線
+ *       （達華斯只做大多頭裡的股票）。
+ * 出場：沒有固定目標價，靠移動停損讓獲利奔跑 ——
+ *       停損 = 突破的那個箱底；之後每形成新的箱子，停損上移到新箱底，只升不降。
+ *       盤中最低價碰到停損就出場（跳空則用開盤價）。持有超過 maxHold 天以收盤價出場。
+ */
+function backtestBox(bars, ind, boxes, { warmup = 61, maxHold = 120, trendFilter = false } = {}) {
+  const trades = [];
+  let i = Math.max(warmup, 1);
+
+  while (i < bars.length - 1) {
+    const box = boxes.breakout[i];
+    const volAvg = ind.volMa20[i];
+    const bar = bars[i];
+    const trendOk = !trendFilter
+      || (isNum(ind.ma60[i]) && isNum(ind.ma20[i]) && bar.close > ind.ma60[i] && ind.ma20[i] > ind.ma60[i]);
+    if (!box || !volAvg || bar.volume < volAvg * BOX_VOLUME || !trendOk) { i++; continue; }
+
+    const entryIdx = i + 1;
+    const entry = bars[entryIdx].open;
+    let stop = box.bottom;
+    if (!(entry > stop)) { i++; continue; }
+
+    let exitIdx = entryIdx;
+    let exit = null;
+    let reason = null;
+    for (let j = entryIdx; j < bars.length && j <= entryIdx + maxHold; j++) {
+      const b = bars[j];
+      exitIdx = j;
+      // 前一根收盤才成立的新箱子，從這一根起生效
+      const fresh = j > entryIdx ? boxes.confirmed[j - 1] : null;
+      if (fresh) stop = Math.max(stop, fresh.bottom);
+      if (b.low <= stop) { exit = Math.min(stop, b.open); reason = '跌破箱底'; break; }
+      if (j === entryIdx + maxHold) { exit = b.close; reason = '到期'; break; }
+    }
+    if (exit === null) { exit = bars[exitIdx].close; reason = '持有中'; }
+
+    const ret = exit / entry - 1 - ROUND_TRIP_COST;
+    trades.push({
+      entryDate: bars[entryIdx].date,
+      exitDate: bars[exitIdx].date,
+      entry: round(entry, 2),
+      exit: round(exit, 2),
+      returnPct: round(ret * 100, 2),
+      days: exitIdx - entryIdx,
+      reason,
+    });
+    i = exitIdx + 1;
+  }
+  return trades;
 }
 
 /** 回測用的輕量判讀：只需要通道與位置，不必產生整套文字理由 */
@@ -1683,8 +1830,8 @@ function summarizeTrades(trades, limit) {
 
 // ── 對外：完整報告 ────────────────────────────────────
 
-/** 多週期比較用的通道長度（約一季、半年、一年） */
-const TIMEFRAMES = [60, 120, 240];
+/** 多週期比較用的通道長度（約一個半月、一季、半年、一年） */
+const TIMEFRAMES = [30, 60, 120, 240];
 
 /** 圖表在通道之前再多畫幾根，看得出通道是從哪裡開始的 */
 const CHART_LEAD = 30;
@@ -1805,7 +1952,7 @@ function report(bars, { lookback = 120, capital, riskPct } = {}) {
   };
 }
 
-return { sma, ema, rsi, kd, macd, bollinger, atr, indicators, fitChannel, locate, divergence, buyConfirmations, sellConfirmations, evaluateAt, tradePlan, backtest, report, ROUND_TRIP_COST };
+return { sma, ema, rsi, kd, macd, bollinger, atr, indicators, fitChannel, locate, divergence, buyConfirmations, sellConfirmations, evaluateAt, tradePlan, backtest, detectBoxes, backtestBox, report, ROUND_TRIP_COST };
 })();
 
 const SampleBars = (function () {
@@ -2885,6 +3032,7 @@ function renderDiagnostics() {
 // 所以只在打開這個分頁、選了某一檔時才另外打 /api/technical。
 
 const TA_LOOKBACKS = [
+  [30, '30 日', '約一個半月，短線進出；通道短、觸碰次數少，可靠度較低'],
   [60, '60 日', '約一季，適合波段短線'],
   [120, '120 日', '約半年，預設'],
   [240, '240 日', '約一年，看大趨勢'],
@@ -3097,7 +3245,7 @@ function signalRows(a) {
 }
 
 function timeframeCard(a) {
-  const tfLabel = { 60: '短（60 日）', 120: '中（120 日）', 240: '長（240 日）' };
+  const tfLabel = { 30: '超短（30 日）', 60: '短（60 日）', 120: '中（120 日）', 240: '長（240 日）' };
   const rows = a.timeframes.map((tf) => {
     if (!tf.available) return `<li class="flex justify-between text-sm"><span class="text-muted">${tfLabel[tf.lookback]}</span><span class="text-faint">資料不足</span></li>`;
     const tone = tf.trend === 'up' ? 'text-up' : tf.trend === 'down' ? 'text-down' : 'text-sub';
@@ -3112,7 +3260,7 @@ function timeframeCard(a) {
   const aligned = trends.length >= 2 && trends.every((x) => x === trends[0]);
   const summary = !trends.length ? ''
     : aligned
-      ? `三個週期方向一致（${trends[0] === 'up' ? '都向上' : trends[0] === 'down' ? '都向下' : '都是盤整'}），訊號可信度較高。`
+      ? `${['', '', '兩', '三', '四'][trends.length]}個週期方向一致（${trends[0] === 'up' ? '都向上' : trends[0] === 'down' ? '都向下' : '都是盤整'}），訊號可信度較高。`
       : '長短週期方向不一致：短線訊號可能只是大趨勢裡的一段反向波動，部位宜縮小。';
 
   return `<div class="bg-surface rounded-xl border border-line">
