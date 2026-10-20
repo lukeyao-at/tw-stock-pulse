@@ -276,6 +276,9 @@ window.fetch = async (url, opts) => {
   if (href.startsWith('/api/technical')) {
     return asJson(buildTechnical(new URLSearchParams(href.split('?')[1] || '')));
   }
+  if (href.startsWith('/api/sector')) {
+    return asJson(Market.sectorStocks(STOCKS, new URLSearchParams(href.split('?')[1] || '').get('name') || ''));
+  }
   if (href.startsWith('/api/search')) {
     const q = new URLSearchParams(href.split('?')[1] || '').get('q') || '';
     return asJson({ query: q, results: Universe.search(STOCKS, q), degraded: MODE !== 'snapshot' });

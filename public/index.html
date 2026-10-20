@@ -42,6 +42,8 @@
   <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
   <symbol id="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19"/></symbol>
 </svg>
 
@@ -50,13 +52,13 @@
     <!-- 手機上以浮層呈現（fixed），桌機才是版面的一部分（md:static）。
          若沿用 flex 子元素的作法，手機打開選單會擠壓內容區。 -->
     <div id="backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden"></div>
-    <aside class="hidden md:flex fixed md:static inset-y-0 left-0 z-40 w-64 md:w-60 flex-col bg-sidebar text-slate-300 shrink-0 overflow-y-auto">
-        <div class="px-5 py-5 border-b border-slate-700/60">
+    <aside class="hidden md:flex fixed md:sticky md:top-0 md:h-screen inset-y-0 left-0 z-40 w-64 md:w-60 flex-col bg-sidebar text-slate-300 shrink-0 overflow-y-auto">
+        <div class="side-pad px-5 py-5 border-b border-slate-700/60">
             <div class="flex items-center gap-2.5">
                 <span class="w-9 h-9 rounded-lg bg-brand-600 grid place-items-center text-white">
                     <svg class="w-4 h-4 inline-block align-[-0.15em] shrink-0" aria-hidden="true"><use href="#i-chart-line"/></svg>
                 </span>
-                <div>
+                <div class="side-label">
                     <div class="text-white font-semibold leading-tight">台股脈動</div>
                     <div class="text-[11px] text-slate-400">策略分析</div>
                     <div id="sync-badge" class="text-[11px] text-slate-500"></div>
@@ -68,7 +70,12 @@
             <!-- 由 app.js 產生 -->
         </nav>
 
-        <div class="px-5 py-4 border-t border-slate-700/60 text-[11px] leading-relaxed text-slate-400">
+        <!-- 桌機才有收合（手機是浮層選單，點背景就關） -->
+        <button id="sidebar-toggle" data-sidebar-toggle class="side-pad hidden md:flex items-center gap-2 px-5 py-2.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 border-t border-slate-700/60" aria-expanded="true" title="收合側欄">
+            <svg class="w-4 h-4 shrink-0" aria-hidden="true"><use href="#i-chevron-left"/></svg><span id="sidebar-toggle-label">收合側欄</span>
+        </button>
+
+        <div class="side-label px-5 py-4 border-t border-slate-700/60 text-[11px] leading-relaxed text-slate-400">
             <div id="side-status">尚未載入</div>
             <div class="mt-2 text-slate-500">資料來源：證交所、櫃買中心公開資訊</div>
         </div>
@@ -125,9 +132,10 @@
                 </div>
                 <div id="holding-cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
-                <div class="flex flex-wrap items-baseline justify-between gap-2 mt-10 mb-3">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mt-10 mb-3">
                     <h2 class="text-lg font-semibold">自選股</h2>
-                    <span class="text-xs text-muted" id="watch-count"></span>
+                    <span class="text-xs text-muted mr-auto" id="watch-count"></span>
+                    <div id="watch-sort" class="flex flex-wrap items-center gap-1.5" role="group" aria-label="自選股排序"></div>
                 </div>
                 <div class="bg-surface rounded-xl border border-line">
                     <div class="overflow-x-auto"><div id="watch-table"></div></div>
@@ -173,7 +181,7 @@
                 <div class="bg-surface rounded-xl border border-line p-5 mb-6">
                     <div class="flex flex-wrap items-end gap-x-6 gap-y-4">
                         <div class="min-w-0 flex-1 basis-full lg:basis-0">
-                            <label class="block text-xs text-muted mb-2">標的（自選股）</label>
+                            <label class="block text-xs text-muted mb-2" for="ta-select">標的</label>
                             <div id="ta-picker" class="flex flex-wrap gap-1.5"></div>
                         </div>
                         <div>

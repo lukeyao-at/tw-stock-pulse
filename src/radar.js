@@ -255,7 +255,7 @@ export function combineFlows(daily) {
  * @param {{industryOf:Map, priceOf:Map, nameOf:Map}} lookup
  * @param {{top?:number, perSector?:number}} opts
  */
-export function stockFlows(daily, { industryOf, priceOf, nameOf }, { top = 15, perSector = 3 } = {}) {
+export function stockFlows(daily, { industryOf, priceOf, nameOf }, { top = 15, perSector = 8 } = {}) {
   const by = new Map();
   daily.forEach(({ rows }, dayIndex) => {
     for (const r of rows) {

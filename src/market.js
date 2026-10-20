@@ -41,3 +41,18 @@ export function marketSummary(stocks, { minShare = 0.5 } = {}) {
 
   return { up, down, flat: rows.length - up - down, total: rows.length, turnover, sectors };
 }
+
+/**
+ * 某個產業今天的個股，依成交值由大到小（成交值大的才是撐起產業漲跌的股票）。
+ * @returns {{name:string, count:number, stocks:Array}}
+ */
+export function sectorStocks(stocks, name) {
+  const list = (stocks ?? [])
+    .filter((s) => s.industry === name && isNum(s.changePercent))
+    .sort((a, b) => (b.turnover ?? 0) - (a.turnover ?? 0))
+    .map((s) => ({
+      code: s.code, name: s.name, close: s.close ?? null, change: s.change ?? null,
+      changePercent: s.changePercent, turnover: s.turnover ?? null,
+    }));
+  return { name, count: list.length, stocks: list };
+}

@@ -21,7 +21,7 @@ import { analyze, summarize } from './sentiment.js';
 import { symbolsFor } from './match.js';
 import { recommend } from './recommend.js';
 import { report as technicalReport, indexSummary } from './technical.js';
-import { marketSummary } from './market.js';
+import { marketSummary, sectorStocks as sectorStocksOf } from './market.js';
 import { sampleBars } from './sample-bars.js';
 import * as sector from './sources/sector.js';
 import * as finmind from './sources/finmind.js';
@@ -430,6 +430,12 @@ export async function radar(body = {}) {
     notes: [...new Set(notes)],
     disclaimer: '整理公開資訊與歷史數據，訊號提早出現不代表一定會發動；不構成投資建議。',
   };
+}
+
+/** 某產業今天的個股（總覽點開「產業今日漲跌」用） */
+export async function sectorStocks(name) {
+  const uni = await universe.load();
+  return sectorStocksOf(uni.stocks, String(name || ''));
 }
 
 /** 個股搜尋（自選股輸入框用） */

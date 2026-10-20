@@ -47,6 +47,10 @@ const DEFAULT_PROFILE = {
   taLookback: 120,
   // K 線圖顯示幾根（0 = 全部）；各裝置螢幕不同，不跟雲端同步
   taBars: 120,
+  // 側欄收合、自選股排序：各裝置的瀏覽習慣，不跟雲端同步
+  sidebarCollapsed: false,
+  watchSort: 'list',
+  watchSortDir: 'desc',
   taCapital: 1000000,
   taRiskPct: 1,
 };
@@ -550,21 +554,86 @@ function renderBreadth(sum) {
  * 正負對稱的水平長條（台股慣例：漲／買超紅色往右，跌／賣超綠色往左）。
  * 數值另外寫在條尾並帶正負號，不只靠顏色分辨方向。
  */
-function divergingRows(rows, { format, unit = '' }) {
+function divergingRows(rows, { format, unit = '', expand = null }) {
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-9);
-  return `<ul class="space-y-1.5">${rows.map((r) => {
+  return `<ul class="space-y-0.5">${rows.map((r) => {
     const w = (Math.abs(r.value) / max) * 100;
     const bar = `<div class="h-3.5 ${r.value >= 0 ? 'bg-up rounded-r' : 'bg-down rounded-l'}" style="width:${w.toFixed(1)}%"></div>`;
-    return `<li class="flex items-center gap-3 text-sm" title="${esc(r.title || '')}">
-      <span class="w-24 shrink-0 truncate text-sub">${esc(r.name)}</span>
+    const open = expand && expand.open === r.name;
+    const inner = `
+      <span class="w-24 shrink-0 truncate text-sub">${expand ? `<span class="inline-block w-3 text-faint">${open ? '▾' : '▸'}</span>` : ''}${esc(r.name)}</span>
       <div class="flex-1 flex items-center min-w-0">
         <div class="w-1/2 flex justify-end">${r.value < 0 ? bar : ''}</div>
         <div class="w-px h-5 bg-line shrink-0"></div>
         <div class="w-1/2 flex">${r.value >= 0 ? bar : ''}</div>
       </div>
-      <span class="w-20 shrink-0 text-right num font-medium">${esc(format(r.value))}${esc(unit)}</span>
-    </li>`;
+      <span class="w-20 shrink-0 text-right num font-medium">${esc(format(r.value))}${esc(unit)}</span>`;
+    return `<li title="${esc(r.title || '')}">${expand
+      ? `<button data-ov-expand="${expand.kind}" data-name="${esc(r.name)}" aria-expanded="${open}"
+           class="w-full flex items-center gap-3 text-sm text-left rounded-md px-1.5 py-1 hover:bg-raised ${open ? 'bg-raised' : ''}">${inner}</button>
+         ${open ? `<div class="px-1.5 pt-1 pb-3">${expand.detail(r.name)}</div>` : ''}`
+      : `<div class="flex items-center gap-3 text-sm px-1.5 py-1">${inner}</div>`}</li>`;
   }).join('')}</ul>`;
+}
+
+/** 總覽裡點開的產業（每張卡各自只開一個） */
+const ovOpen = { sector: null, flow: null };
+const ovShowAll = { sector: false };
+const sectorCache = new Map();
+
+async function loadSectorStocks(name) {
+  if (sectorCache.has(name)) return;
+  sectorCache.set(name, null); // 載入中
+  try {
+    const res = await fetch(`/api/sector?name=${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
+    sectorCache.set(name, await res.json());
+  } catch (err) {
+    sectorCache.set(name, { error: err.message });
+  }
+  if (ovOpen.sector === name && latest) renderSectors(latest.market.summary);
+}
+
+/** 個股列：名稱點下去看技術分析；不在自選的可以直接加入 */
+function stockLine(s, right) {
+  const watching = profile.watchlist.includes(s.code);
+  return `<li class="flex items-center gap-2 py-1.5 text-sm">
+    <button data-ta-open="${esc(s.code)}" class="min-w-0 flex-1 text-left truncate hover:text-accent-ink hover:underline" title="看技術分析">
+      <span class="font-medium">${esc(s.name)}</span> <span class="text-xs text-muted num">${esc(s.code)}</span></button>
+    ${right}
+    ${watching
+      ? '<span class="w-12 shrink-0 text-right text-[11px] text-faint">已在自選</span>'
+      : `<button data-add-watch="${esc(s.code)}" class="w-12 shrink-0 text-right text-xs text-accent-ink hover:underline" title="加入自選">＋自選</button>`}
+  </li>`;
+}
+
+function sectorDetail(name) {
+  const r = sectorCache.get(name);
+  if (r === undefined || r === null) return '<p class="text-xs text-muted py-2">載入中…</p>';
+  if (r.error) return `<p class="text-xs text-danger py-2">載入失敗：${esc(r.error)}</p>`;
+  if (!r.stocks.length) return '<p class="text-xs text-muted py-2">這個產業今天沒有成交資料</p>';
+  const limit = 12;
+  const list = ovShowAll.sector ? r.stocks : r.stocks.slice(0, limit);
+  return `<div class="text-[11px] text-muted mb-1">${r.count} 檔，依今日成交值排序</div>
+    <ul class="divide-y divide-line-soft">${list.map((s) => stockLine(s, `
+      <span class="w-16 shrink-0 text-right num">${fmt(s.close)}</span>
+      <span class="w-16 shrink-0 text-right num ${trendClass(s.changePercent)}">${signed(s.changePercent)}%</span>
+      <span class="w-16 shrink-0 text-right num text-xs text-muted hidden sm:inline">${esc(fmtTurnover(s.turnover))}</span>`)).join('')}</ul>
+    ${r.stocks.length > limit ? `<button data-ov-showall="sector" class="mt-1 text-xs text-accent-ink hover:underline">${ovShowAll.sector ? '只看前 12 檔' : `顯示全部 ${r.stocks.length} 檔`}</button>` : ''}`;
+}
+
+function flowDetail(name) {
+  const st = radarLatest?.flows?.stocks;
+  const buys = st?.bySector?.[name] ?? [];
+  const sells = st?.sellBySector?.[name] ?? [];
+  if (!buys.length && !sells.length) return '<p class="text-xs text-muted py-2">沒有這個產業的個股明細</p>';
+  const col = (title, list) => `<div class="min-w-0">
+    <div class="text-[11px] text-muted mb-0.5">${title}</div>
+    ${list.length ? `<ul class="divide-y divide-line-soft">${list.map((s) => stockLine(s, `
+      <span class="w-20 shrink-0 text-right num ${trendClass(s.total)}">${esc(yi(s.total))}</span>`)).join('')}</ul>`
+      : '<p class="text-xs text-faint py-1.5">無</p>'}</div>`;
+  return `<div class="grid sm:grid-cols-2 gap-x-6">${col(`買超前 ${buys.length} 檔`, buys)}${col(`賣超前 ${sells.length} 檔`, sells)}</div>
+    <div class="text-[11px] text-faint mt-1">近 ${st.days} 日三大法人合計；金額以最新收盤價換算</div>`;
 }
 
 function renderSectors(sum) {
@@ -572,12 +641,12 @@ function renderSectors(sum) {
   $('ov-sectors').innerHTML = `
     <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
       <h3 class="font-semibold">產業今日漲跌</h3>
-      <span class="text-xs text-muted">成交值加權・只列成交比重 ≥ 0.5% 的產業</span>
+      <span class="text-xs text-muted">成交值加權・只列成交比重 ≥ 0.5% 的產業・點產業看個股</span>
     </div>
     ${list.length ? divergingRows(list.map((s) => ({
       name: s.name, value: s.changePercent,
-      title: `${s.name}：${signed(s.changePercent)}%，成交比重 ${fmt(s.share)}%，${s.count} 檔`,
-    })), { format: (v) => `${signed(v)}%` }) : emptyState('沒有產業資料', 'chart-pie')}`;
+      title: `${s.name}：${signed(s.changePercent)}%，成交比重 ${fmt(s.share)}%，${s.count} 檔（點開看個股）`,
+    })), { format: (v) => `${signed(v)}%`, expand: { kind: 'sector', open: ovOpen.sector, detail: sectorDetail } }) : emptyState('沒有產業資料', 'chart-pie')}`;
 }
 
 function renderFlowsOverview() {
@@ -596,11 +665,11 @@ function renderFlowsOverview() {
   const sorted = [...f.sectors].sort((a, b) => b.total - a.total);
   const buy = sorted.filter((s) => s.total > 0).slice(0, 6);
   const sell = sorted.filter((s) => s.total < 0).slice(-6);
-  $('ov-flows').innerHTML = head(`${f.market}・近 ${f.days} 日合計・單位億元`)
+  $('ov-flows').innerHTML = head(`${f.market}・近 ${f.days} 日合計・單位億元・點產業看個股`)
     + divergingRows([...buy, ...sell].map((s) => ({
       name: s.name, value: s.total / 1e8,
-      title: `${s.name}：外資 ${fmt(s.foreign / 1e8, 1)} 億、投信 ${fmt(s.trust / 1e8, 1)} 億、自營 ${fmt(s.dealer / 1e8, 1)} 億`,
-    })), { format: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}` });
+      title: `${s.name}：外資 ${fmt(s.foreign / 1e8, 1)} 億、投信 ${fmt(s.trust / 1e8, 1)} 億、自營 ${fmt(s.dealer / 1e8, 1)} 億（點開看個股）`,
+    })), { format: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`, expand: { kind: 'flow', open: ovOpen.flow, detail: flowDetail } });
 }
 
 // ── 持股：每檔一張卡
@@ -687,9 +756,47 @@ function holdingCard(s) {
 
 // ── 自選股：一列一檔，走勢、通道位置、箱型、判讀並排
 
+/**
+ * 自選股的排序方式。再按一次同一個會反轉方向。
+ * 判讀：綜合分數高（偏多）在前；通道位置：靠下緣（買點區）在前。沒有判讀資料的一律排最後。
+ */
+const WATCH_SORTS = [
+  ['list', '清單順序', null],
+  ['verdict', '判讀', (s) => s.ta?.score],
+  ['change', '今日漲跌', (s) => s.changePercent],
+  ['position', '通道位置', (s) => (s.ta ? -s.ta.position : null)],
+];
+
+function sortWatch(rows) {
+  const [, , key] = WATCH_SORTS.find(([k]) => k === profile.watchSort) || WATCH_SORTS[0];
+  if (!key) return rows;
+  const dir = profile.watchSortDir === 'asc' ? -1 : 1;
+  const val = (s) => { const v = key(s); return typeof v === 'number' && Number.isFinite(v) ? v : null; };
+  return [...rows].sort((a, b) => {
+    const va = val(a);
+    const vb = val(b);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    return (vb - va) * dir;
+  });
+}
+
+function renderWatchSort() {
+  const hint = { verdict: ['偏多在前', '偏空在前'], change: ['漲幅大在前', '跌幅大在前'], position: ['靠下緣在前', '靠上緣在前'] };
+  $('watch-sort').innerHTML = `<span class="text-xs text-muted mr-1">排序</span>${WATCH_SORTS.map(([k, label]) => {
+    const active = profile.watchSort === k;
+    const arrow = active && k !== 'list' ? (profile.watchSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    const title = hint[k] ? hint[k][active && profile.watchSortDir !== 'asc' ? 1 : 0] : '';
+    return `<button data-watch-sort="${k}" class="px-2.5 py-1 text-xs rounded-md border ${active ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface border-line text-sub hover:bg-raised'}"
+      ${title ? `title="再按一次：${esc(title)}"` : ''} aria-pressed="${active}">${esc(label)}${arrow}</button>`;
+  }).join('')}`;
+}
+
 function renderWatchlist() {
   const holdingSet = new Set(profile.holdings);
-  const rows = latest.watchlist.filter((w) => !holdingSet.has(w.code));
+  const rows = sortWatch(latest.watchlist.filter((w) => !holdingSet.has(w.code)));
+  renderWatchSort();
   $('watch-count').textContent = `${rows.length} 檔`;
   if (rows.length === 0) {
     $('watch-table').innerHTML = emptyState(latest.watchlist.length === 0 ? '還沒有自選股，用上方搜尋框加入' : '所有自選股都已設為持股', 'star');
@@ -1095,10 +1202,20 @@ const chip = (active) => `px-3 py-1.5 text-sm rounded-lg border ${
 function renderTechnicalControls() {
 
   const options = taOptions();
-  $('ta-picker').innerHTML = options.length === 0
+  const holdingSet = new Set(profile.holdings);
+  const opt = (s) => `<option value="${esc(s.code)}" ${s.code === profile.taCode ? 'selected' : ''}>${esc(s.code)}${s.name !== s.code ? `　${esc(s.name)}` : ''}</option>`;
+  const held = options.filter((s) => holdingSet.has(s.code));
+  const rest = options.filter((s) => !holdingSet.has(s.code));
+  // 從「其他代號」或產業列表點進來的標的不在清單裡，也要選得到、看得出是哪一檔
+  const extra = profile.taCode && !options.some((s) => s.code === profile.taCode)
+    ? `<option value="${esc(profile.taCode)}" selected>${esc(profile.taCode)}（不在自選）</option>` : '';
+  $('ta-picker').innerHTML = options.length === 0 && !extra
     ? '<span class="text-sm text-faint">還沒有自選股，右側直接輸入代號</span>'
-    : options.map((s) => `<button data-ta-code="${esc(s.code)}" class="${chip(s.code === profile.taCode)}">
-        <span class="num">${esc(s.code)}</span>${s.name !== s.code ? ` ${esc(s.name)}` : ''}</button>`).join('');
+    : `<select id="ta-select" aria-label="選擇標的" class="w-full sm:w-80 px-3 py-2 text-sm rounded-lg border border-line bg-surface text-ink num">
+        ${extra}
+        ${held.length ? `<optgroup label="持股">${held.map(opt).join('')}</optgroup>` : ''}
+        ${rest.length ? `<optgroup label="自選股">${rest.map(opt).join('')}</optgroup>` : ''}
+      </select>`;
 
   $('ta-lookback').innerHTML = TA_LOOKBACKS.map(([n, label, hint]) =>
     `<button data-ta-lookback="${n}" title="${esc(hint)}" class="${chip(n === profile.taLookback)} num">${esc(label)}</button>`).join('');
@@ -1881,7 +1998,7 @@ function flowsCard(r) {
       const top = [...f.slice(0, 6), ...f.slice(-6).filter((x) => !f.slice(0, 6).includes(x))];
       const maxAbs = Math.max(...top.map((x) => Math.abs(x.total)));
       // 每個產業附上「是誰在撐／是誰在拖」：買超產業列買超最多的個股，賣超產業列賣超最多的
-      const leaders = (x) => (x.total > 0 ? st?.bySector?.[x.name] : st?.sellBySector?.[x.name]) ?? [];
+      const leaders = (x) => ((x.total > 0 ? st?.bySector?.[x.name] : st?.sellBySector?.[x.name]) ?? []).slice(0, 3);
       body = `<ul class="p-5 space-y-3">${top.map((x) => `
         <li class="text-sm" title="外資 ${yi(x.foreign)}、投信 ${yi(x.trust)}、自營商 ${yi(x.dealer)}">
           <div class="flex justify-between gap-2"><span>${esc(x.name)}${x.bothBuyDays >= Math.ceil(x.days / 2) ? ' <span class="text-[11px] text-up">外資投信同買 ' + x.bothBuyDays + ' 天</span>' : ''}</span>
@@ -2006,12 +2123,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach((el) => el.classList.remove('active'));
   $(`tab-${name}`)?.classList.add('active');
 
-  document.querySelectorAll('[data-tab]').forEach((el) => {
-    const active = el.dataset.tab === name;
-    el.className = `w-full flex items-center gap-2.5 px-5 py-2.5 text-sm transition ${
-      active ? 'bg-brand-600/15 text-white border-r-2 border-brand-500' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-    }`;
-  });
+  document.querySelectorAll('[data-tab]').forEach((el) => { el.className = navClass(el.dataset.tab === name); });
 
   location.hash = name;
 
@@ -2022,6 +2134,32 @@ function switchTab(name) {
 
   // 手機上選完分頁就把浮層選單收起來，否則會一直蓋住內容
   if (window.matchMedia('(max-width: 767px)').matches) closeMobileMenu();
+}
+
+/** 導覽按鈕的樣式；桌機收合時只留圖示並置中 */
+function navClass(active) {
+  const collapsed = profile.sidebarCollapsed;
+  return `w-full flex items-center gap-2.5 px-5 ${collapsed ? 'md:px-0 md:justify-center' : ''} py-2.5 text-sm transition ${
+    active ? 'bg-brand-600/15 text-white border-r-2 border-brand-500' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+  }`;
+}
+
+/** 桌機側欄收合：寬度縮成只放圖示，文字藏起來（手機的浮層選單不受影響） */
+function applySidebar() {
+  const aside = document.querySelector('aside');
+  const c = Boolean(profile.sidebarCollapsed);
+  aside.classList.toggle('md:w-60', !c);
+  aside.classList.toggle('md:w-16', c);
+  document.querySelectorAll('.side-label').forEach((el) => el.classList.toggle('md:hidden', c));
+  document.querySelectorAll('.side-pad').forEach((el) => el.classList.toggle('md:px-3', c));
+  const active = document.querySelector('.tab-content.active')?.id?.replace('tab-', '');
+  document.querySelectorAll('[data-tab]').forEach((el) => { el.className = navClass(el.dataset.tab === active); });
+  const btn = $('sidebar-toggle');
+  btn.classList.toggle('md:justify-center', c);
+  btn.setAttribute('aria-expanded', String(!c));
+  btn.title = c ? '展開側欄' : '收合側欄';
+  btn.querySelector('use').setAttribute('href', c ? '#i-chevron-right' : '#i-chevron-left');
+  $('sidebar-toggle-label').textContent = c ? '' : '收合側欄';
 }
 
 function setMobileMenu(open) {
@@ -2039,6 +2177,8 @@ function addToWatchlist(code) {
   saveProfile();
   notify(`已加入自選 ${code}`);
   refresh();
+  if (latest && ovOpen.sector) renderSectors(latest.market.summary);
+  if (latest && ovOpen.flow) renderFlowsOverview();
   // 從產業雷達的法人排行加入時，列表上的「自選」標記要立刻更新
   if ($('tab-radar').classList.contains('active') && radarLatest) renderRadar();
 }
@@ -2047,12 +2187,13 @@ let searchTimer = null;
 
 function initEvents() {
   $('nav').innerHTML = TABS.map(([key, label, icon]) => `
-    <button data-tab="${key}" class="w-full flex items-center gap-2.5 px-5 py-2.5 text-sm text-slate-400">
-      <svg class="w-4 h-4 shrink-0" aria-hidden="true"><use href="#i-${icon}"/></svg>${esc(label)}
+    <button data-tab="${key}" class="${navClass(false)}" title="${esc(label)}">
+      <svg class="w-4 h-4 shrink-0" aria-hidden="true"><use href="#i-${icon}"/></svg><span class="side-label">${esc(label)}</span>
     </button>`).join('');
+  applySidebar();
 
   document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-toggle-holding], [data-risk], [data-goal], [data-news-filter], [data-ta-code], [data-ta-lookback], [data-ta-bars], [data-ta-open], [data-flow-view]');
+    const target = event.target.closest('[data-tab], [data-add-watch], [data-remove-watch], [data-toggle-holding], [data-risk], [data-goal], [data-news-filter], [data-ta-code], [data-ta-lookback], [data-ta-bars], [data-ta-open], [data-watch-sort], [data-ov-expand], [data-ov-showall], [data-sidebar-toggle], [data-flow-view]');
     if (!target) return;
 
     const d = target.dataset;
@@ -2084,6 +2225,41 @@ function initEvents() {
       saveProfile();
       refresh(); // 總覽的通道判讀用同一個通道長度
       return loadTechnical();
+    }
+
+    if (d.sidebarToggle !== undefined) {
+      profile.sidebarCollapsed = !profile.sidebarCollapsed;
+      saveLocal();
+      applySidebar();
+      // 側欄寬度變了，圖要依新的寬度重畫
+      setTimeout(() => {
+        if (latest && $('tab-overview').classList.contains('active')) renderOverview();
+        if (taLatest && $('tab-technical').classList.contains('active')) renderTechnical();
+      }, 0);
+      return;
+    }
+
+    if (d.watchSort) {
+      if (profile.watchSort === d.watchSort) profile.watchSortDir = profile.watchSortDir === 'asc' ? 'desc' : 'asc';
+      else { profile.watchSort = d.watchSort; profile.watchSortDir = 'desc'; }
+      saveLocal();
+      return renderWatchlist();
+    }
+
+    if (d.ovExpand) {
+      const kind = d.ovExpand;
+      ovOpen[kind] = ovOpen[kind] === d.name ? null : d.name;
+      if (kind === 'sector') {
+        ovShowAll.sector = false;
+        if (ovOpen.sector) loadSectorStocks(ovOpen.sector);
+        return renderSectors(latest.market.summary);
+      }
+      return renderFlowsOverview();
+    }
+
+    if (d.ovShowall) {
+      ovShowAll.sector = !ovShowAll.sector;
+      return renderSectors(latest.market.summary);
     }
 
     if (d.taBars) {
@@ -2218,6 +2394,14 @@ function initEvents() {
   });
 
   $('search').addEventListener('blur', () => setTimeout(() => $('search-results').classList.add('hidden'), 150));
+
+  // 技術分析標的的下拉選單（每次渲染都重建，所以用事件委派）
+  document.addEventListener('change', (event) => {
+    if (event.target.id !== 'ta-select') return;
+    profile.taCode = event.target.value;
+    saveProfile();
+    loadTechnical();
+  });
 
   // 使用者開始修正欄位就拿掉錯誤標記
   document.addEventListener('input', (e) => e.target.removeAttribute?.('aria-invalid'));

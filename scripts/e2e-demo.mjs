@@ -74,6 +74,46 @@ check('總覽：自選股列有走勢與通道位置', (await p.$$eval('#watch-t
 await p.hover('#ov-index-chart .lc-hit', { position: { x: 120, y: 60 } }); await p.waitForTimeout(150);
 check('總覽：滑過指數圖顯示數值', await p.isVisible('#ov-index-chart .lc-tip'));
 
+// 自選股排序：判讀（偏多在前），再按一次反過來
+const rowCodes = () => p.$$eval('#watch-table tbody tr [data-ta-open]', (b) => b.map((x) => x.dataset.taOpen));
+const listOrder = await rowCodes();
+await p.click('[data-watch-sort=verdict]'); await p.waitForTimeout(200);
+const byVerdict = await rowCodes();
+const scores = await p.evaluate((codes) => codes.map((c) => latest.watchlist.find((w) => w.code === c)?.ta?.score ?? null), byVerdict);
+const known = scores.filter((v) => v !== null);
+check('自選股依判讀排序（偏多在前）', known.every((v, i) => i === 0 || known[i - 1] >= v) && scores.indexOf(null) === -1 || scores.slice(scores.indexOf(null)).every((v) => v === null), JSON.stringify(scores));
+await p.click('[data-watch-sort=verdict]'); await p.waitForTimeout(200);
+const rev = await p.evaluate((codes) => codes.map((c) => latest.watchlist.find((w) => w.code === c)?.ta?.score ?? null).filter((v) => v !== null), await rowCodes());
+check('再按一次判讀排序會反轉', rev.every((v, i) => i === 0 || rev[i - 1] <= v), JSON.stringify(rev));
+await p.click('[data-watch-sort=list]'); await p.waitForTimeout(200);
+check('回到清單順序', JSON.stringify(await rowCodes()) === JSON.stringify(listOrder));
+
+// 產業今日漲跌、法人買賣超：點產業看個股
+await p.click('#ov-sectors [data-ov-expand]'); await p.waitForTimeout(400);
+const sectorStocks = await p.$$eval('#ov-sectors li li', (l) => l.length);
+check('產業今日漲跌：點開看個股', sectorStocks > 0 && (await p.$eval('#ov-sectors [data-ov-expand]', (b) => b.getAttribute('aria-expanded'))) === 'true', `${sectorStocks} 檔`);
+const addBtn = await p.$('#ov-sectors li li [data-add-watch]');
+if (addBtn) {
+  const nw = await p.evaluate(() => profile.watchlist.length);
+  await addBtn.click(); await p.waitForTimeout(500);
+  check('產業個股可加入自選', (await p.evaluate(() => profile.watchlist.length)) === nw + 1);
+  await p.evaluate(() => { profile.watchlist.pop(); saveLocal(); }); await p.click('#refresh'); await p.waitForTimeout(500);
+}
+await p.click('#ov-sectors [data-ov-expand][aria-expanded=true]'); await p.waitForTimeout(200);
+check('產業今日漲跌：再點一次收起', (await p.$$eval('#ov-sectors li li', (l) => l.length)) === 0);
+await p.click('#ov-flows [data-ov-expand]'); await p.waitForTimeout(300);
+check('法人買賣超：點開看個股', /買超前|賣超前/.test(await visibleText(p, '#ov-flows')) && (await p.$$eval('#ov-flows li li', (l) => l.length)) > 0, (await visibleText(p, '#ov-flows')).slice(0, 80));
+
+// 側欄收合：只剩圖示，圖跟著新寬度重畫；再按一次展開
+const asideW = () => p.$eval('aside', (a) => a.getBoundingClientRect().width);
+const chartW0 = await p.$eval('#ov-index-chart svg', (s) => s.getBoundingClientRect().width);
+await p.click('#sidebar-toggle'); await p.waitForTimeout(300);
+const collapsedW = await asideW();
+const chartW1 = await p.$eval('#ov-index-chart svg', (s) => s.getBoundingClientRect().width);
+check('側欄收合', collapsedW < 80 && !(await p.isVisible('[data-tab=overview] .side-label')) && chartW1 > chartW0, `側欄 ${collapsedW}px、指數圖 ${chartW0} → ${chartW1}px`);
+await p.click('#sidebar-toggle'); await p.waitForTimeout(300);
+check('側欄展開', (await asideW()) > 200 && await p.isVisible('[data-tab=overview] .side-label'));
+
 // 主題
 const th0 = await p.evaluate(() => document.documentElement.dataset.theme || 'system');
 await p.click('#theme-toggle');
@@ -101,7 +141,7 @@ check('自選 → 技術分析', await p.$eval('#tab-technical', (e) => e.classL
 check('K 線圖圖例有箱型', (await visibleText(p, '#ta-body')).includes('箱型（整理中）'));
 let boxesSeen = 0;
 for (const k of [1, 2, 3]) {
-  await p.click(`#ta-picker button:nth-child(${k})`); await p.waitForTimeout(500);
+  await p.selectOption('#ta-select', { index: k - 1 }); await p.waitForTimeout(500);
   boxesSeen += await p.$$eval('#ta-charts svg[data-panel=price] g title', (t) => t.filter((e) => e.textContent.startsWith('箱型')).length);
 }
 check('K 線圖上畫得出箱型', boxesSeen > 0, `前 3 檔共 ${boxesSeen} 個箱型`);
@@ -114,9 +154,11 @@ const bars3m = await p.$$eval('#ta-charts svg[data-panel=price] line[stroke-widt
 check('K 線圖切換顯示區間', bars3m === 60 && bars6m > bars3m, `${bars6m} → ${bars3m} 根`);
 
 // 技術分析操作
-await p.click('#ta-picker button:nth-child(2)'); await p.waitForTimeout(600);
+await p.selectOption('#ta-select', { index: 1 }); await p.waitForTimeout(600);
 const taName = await visibleText(p, '#ta-body .text-lg');
 check('技術分析：切換標的', taName.length > 0, taName.slice(0, 20));
+check('技術分析：標的是下拉選單（持股、自選股分組）', (await p.$$eval('#ta-select optgroup', (g) => g.map((x) => x.label))).join('|') === '持股|自選股'
+  && (await p.$$('#ta-picker button')).length === 0);
 await p.click('[data-ta-lookback="60"]'); await p.waitForTimeout(600);
 check('技術分析：切換通道長度', (await visibleText(p, '#ta-body')).includes('60 日'));
 await p.fill('#ta-code', '2330'); await p.click('#ta-go'); await p.waitForTimeout(600);
@@ -212,7 +254,7 @@ check('手機選單點背景關閉', !(await m.isVisible('aside')));
   await t.tap('#search-results [data-add-watch]'); await t.waitForTimeout(500);
   check('手機：點搜尋結果加入自選', (await t.$$eval('#watch-table tbody tr', (r) => r.length)) === before + 1);
   await t.tap('#mobile-menu'); await t.waitForTimeout(200); await t.tap('[data-tab=technical]'); await t.waitForTimeout(800);
-  await t.tap('#ta-picker button:nth-child(3)'); await t.waitForTimeout(600);
+  await t.selectOption('#ta-select', { index: 2 }); await t.waitForTimeout(600);
   check('手機：技術分析點選標的', (await t.$eval('#ta-body', (e) => e.innerText)).includes(await t.evaluate(() => profile.taCode)));
   await t.locator('#ta-charts svg').first().scrollIntoViewIfNeeded();
   const box = await t.locator('#ta-charts svg').first().boundingBox();

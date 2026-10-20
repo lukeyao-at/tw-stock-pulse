@@ -102,6 +102,10 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, await api.search(url.searchParams.get('q') || ''));
     }
 
+    if (url.pathname === '/api/sector') {
+      return sendJson(res, 200, await api.sectorStocks(url.searchParams.get('name') || ''));
+    }
+
     if (url.pathname === '/api/technical') {
       return sendJson(res, 200, await api.technical(Object.fromEntries(url.searchParams)));
     }
