@@ -561,7 +561,7 @@ function divergingRows(rows, { format, unit = '', expand = null }) {
     const bar = `<div class="h-3.5 ${r.value >= 0 ? 'bg-up rounded-r' : 'bg-down rounded-l'}" style="width:${w.toFixed(1)}%"></div>`;
     const open = expand && expand.open === r.name;
     const inner = `
-      <span class="w-24 shrink-0 truncate text-sub">${expand ? `<span class="inline-block w-3 text-faint">${open ? '▾' : '▸'}</span>` : ''}${esc(r.name)}</span>
+      <span class="w-28 shrink-0 break-words leading-tight text-sub">${expand ? `<span class="inline-block w-3 text-faint">${open ? '▾' : '▸'}</span>` : ''}${esc(r.name)}</span>
       <div class="flex-1 flex items-center min-w-0">
         <div class="w-1/2 flex justify-end">${r.value < 0 ? bar : ''}</div>
         <div class="w-px h-5 bg-line shrink-0"></div>
@@ -597,9 +597,9 @@ async function loadSectorStocks(name) {
 /** 個股列：名稱點下去看技術分析；不在自選的可以直接加入 */
 function stockLine(s, right) {
   const watching = profile.watchlist.includes(s.code);
-  return `<li class="flex items-center gap-2 py-1.5 text-sm">
-    <button data-ta-open="${esc(s.code)}" class="min-w-0 flex-1 text-left truncate hover:text-accent-ink hover:underline" title="看技術分析">
-      <span class="font-medium">${esc(s.name)}</span> <span class="text-xs text-muted num">${esc(s.code)}</span></button>
+  return `<li class="flex items-start gap-2 py-1.5 text-sm">
+    <button data-ta-open="${esc(s.code)}" class="min-w-0 flex-1 text-left break-words leading-snug hover:text-accent-ink hover:underline" title="${esc(s.name)} ${esc(s.code)}・看技術分析">
+      <span class="font-medium">${esc(s.name)}</span> <span class="text-xs text-muted num whitespace-nowrap">${esc(s.code)}</span></button>
     ${right}
     ${watching
       ? '<span class="w-12 shrink-0 text-right text-[11px] text-faint">已在自選</span>'
@@ -632,7 +632,7 @@ function flowDetail(name) {
     ${list.length ? `<ul class="divide-y divide-line-soft">${list.map((s) => stockLine(s, `
       <span class="w-20 shrink-0 text-right num ${trendClass(s.total)}">${esc(yi(s.total))}</span>`)).join('')}</ul>`
       : '<p class="text-xs text-faint py-1.5">無</p>'}</div>`;
-  return `<div class="grid sm:grid-cols-2 gap-x-6">${col(`買超前 ${buys.length} 檔`, buys)}${col(`賣超前 ${sells.length} 檔`, sells)}</div>
+  return `<div class="space-y-3">${col(`買超前 ${buys.length} 檔`, buys)}${col(`賣超前 ${sells.length} 檔`, sells)}</div>
     <div class="text-[11px] text-faint mt-1">近 ${st.days} 日三大法人合計；金額以最新收盤價換算</div>`;
 }
 
